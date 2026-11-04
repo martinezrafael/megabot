@@ -3,6 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "license": "MIT",
+  "exports": {
+    "./base.json": "./base.json",
+    "./stricter.json": "./stricter.json",
+    "./strict.json": "./strict.json"
+  },
   "files": [
     "base.json",
     "stricter.json",

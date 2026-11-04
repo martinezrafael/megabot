@@ -1,0 +1,11 @@
+{
+  "name": "@megabot/eslint-config",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.mjs",
+  "files": [
+    "index.mjs",
+    "base.mjs",
+    "node.mjs"
+  ]
+}
