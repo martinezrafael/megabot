@@ -1,0 +1,4 @@
+{
+  "extends": "@megabot/tsconfig/base.json",
+  "exclude": ["node_modules", "apps", "packages"]
+}
