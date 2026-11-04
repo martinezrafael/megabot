@@ -1,18 +1,12 @@
 {
   "name": "megabot",
   "version": "1.0.0",
-  "description": "Bot de atendimento e vendas",
   "main": "index.js",
-  "keywords": ["bot", "vendas", "AI"],
+  "type": "module",
   "author": "Rafael Molina Martinez",
-  "license": "ISC",
-  "devEngines": {
-    "packageManager": {
-      "name": "pnpm",
-      "version": "12.16.1",
-      "onFail": "download"
-    }
-  },
   "packageManager": "pnpm@12.16.1",
-  "type": "module"
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
 }
