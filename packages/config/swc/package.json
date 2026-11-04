@@ -1,0 +1,12 @@
+{
+  "name": "@megabot/swc-config",
+  "version": "1.0.0",
+  "private": true,
+  "license": "MIT",
+  "exports": {
+    "./.swcrc": "./.swcrc"
+  },
+  "files": [
+    ".swcrc"
+  ]
+}
