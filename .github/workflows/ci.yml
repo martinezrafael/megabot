@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+
+jobs:
+  validate-and-test:
+    name: Lint, Typecheck & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Setup Turborepo local cache
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: turbo-${{ github.sha }}-${{ github.ref_name }}
+          restore-keys: |
+            turbo-${{ github.ref_name }}-
+            turbo-
+
+      - name: Run Typecheck
+        run: pnpm typecheck
+
+      - name: Run Lint
+        run: pnpm lint
+
+      - name: Run Tests
+        run: pnpm test
+
+      - name: Run Build
+        run: pnpm build
+
+  docker-build:
+    name: Build Docker Images
+    needs: validate-and-test
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        app: [api, worker]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image for ${{ matrix.app }}
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./apps/${{ matrix.app }}/Dockerfile
+          push: false
+          tags: megabot-${{ matrix.app }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

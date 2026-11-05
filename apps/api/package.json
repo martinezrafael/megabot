@@ -1,0 +1,9 @@
+{
+  "name": "@megabot/api",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "echo 'Build da API'",
+    "start": "node index.js"
+  }
+}

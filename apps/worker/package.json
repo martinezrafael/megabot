@@ -1,0 +1,9 @@
+{
+  "name": "@megabot/worker",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "echo 'Build do Worker'",
+    "start": "node index.js"
+  }
+}
