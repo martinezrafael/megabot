@@ -12,7 +12,12 @@
     "typecheck": "turbo check-types",
     "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,json,md}\"",
-    "prepare": "husky"
+    "prepare": "husky",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:logs": "docker compose logs -f",
+    "db:reset": "docker compose down -v && docker compose up -d",
+    "tunnel": "npx ngrok http 3000"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx,json,md,html,css}": [
