@@ -25,8 +25,6 @@ cd megabot
 pnpm install
 ```
 
-````
-
 ### 2. Configurar variáveis de ambiente
 
 Crie o arquivo `.env` a partir do modelo de exemplo:
@@ -104,7 +102,3 @@ WEBHOOK_BASE_URL=[https://abcd-123.ngrok-free.app](https://abcd-123.ngrok-free.a
 | `pnpm db:logs`   | Exibe os logs do container do banco de dados em tempo real   |
 | `pnpm db:reset`  | Destrói o banco, limpa os volumes e sobe uma instância limpa |
 | `pnpm tunnel`    | Abre o túnel do Ngrok na porta `3000` para testes de webhook |
-
-```
-
-````
