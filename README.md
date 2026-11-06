@@ -1,4 +1,3 @@
-````markdown
 # 🚀 MegaBot — Setup do Ambiente Local
 
 Este repositório contém o ecossistema do **MegaBot** (`api`, `worker`, `web`). Siga o passo a passo abaixo para configurar e executar todo o ambiente de desenvolvimento local do zero em menos de 10 minutos.
@@ -25,6 +24,7 @@ git clone <URL_DO_REPOSITORIO>
 cd megabot
 pnpm install
 ```
+
 ````
 
 ### 2. Configurar variáveis de ambiente
@@ -107,4 +107,4 @@ WEBHOOK_BASE_URL=[https://abcd-123.ngrok-free.app](https://abcd-123.ngrok-free.a
 
 ```
 
-```
+````
