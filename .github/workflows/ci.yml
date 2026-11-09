@@ -11,6 +11,28 @@ jobs:
     name: Lint, Typecheck & Test
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: megabot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d megabot"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Prisma (aceita ?schema=)
+      DATABASE_URL: postgresql://megabot_app:megabot_pass@localhost:5432/megabot?schema=public
+      # psql (libpq rejeita ?schema=, por isso URLs separadas)
+      ADMIN_PG_URL: postgresql://postgres:postgres@localhost:5432/megabot
+      APP_PG_URL: postgresql://megabot_app:megabot_pass@localhost:5432/megabot
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -29,14 +51,26 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Create .env for CI
+        run: printf 'DATABASE_URL=%s\n' "$DATABASE_URL" > .env
+
       - name: Setup Turborepo local cache
         uses: actions/cache@v4
         with:
           path: .turbo
-          key: turbo-${{ github.sha }}-${{ github.ref_name }}
+          key: turbo-${{ github.ref_name }}-${{ github.sha }}
           restore-keys: |
             turbo-${{ github.ref_name }}-
             turbo-
+
+      - name: Init database (roles and extensions)
+        run: psql "$ADMIN_PG_URL" -v ON_ERROR_STOP=1 -f scripts/init-db.sql
+
+      - name: Generate Prisma Client
+        run: pnpm --filter @megabot/database db:generate
+
+      - name: Apply migrations
+        run: pnpm --filter @megabot/database db:migrate:deploy
 
       - name: Run Typecheck
         run: pnpm typecheck
@@ -46,6 +80,17 @@ jobs:
 
       - name: Run Tests
         run: pnpm test
+
+      - name: Verify RLS rollback
+        run: |
+          psql "$APP_PG_URL" -v ON_ERROR_STOP=1 \
+            -f packages/database/prisma/migrations/20261108173323_enable_rls/rollback.sql
+          POLICIES=$(psql "$APP_PG_URL" -tAc "SELECT count(*) FROM pg_policies WHERE tablename = 'memberships'")
+          RLS=$(psql "$APP_PG_URL" -tAc "SELECT relrowsecurity::text || ',' || relforcerowsecurity::text FROM pg_class WHERE relname = 'memberships'")
+          FUNC=$(psql "$APP_PG_URL" -tAc "SELECT count(*) FROM pg_proc WHERE proname = 'current_tenant_id'")
+          test "$POLICIES" = "0"
+          test "$RLS" = "false,false"
+          test "$FUNC" = "0"
 
       - name: Run Build
         run: pnpm build

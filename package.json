@@ -17,6 +17,8 @@
     "db:down": "docker compose down",
     "db:logs": "docker compose logs -f",
     "db:reset": "docker compose down -v && docker compose up -d",
+    "db:generate": "pnpm --filter @megabot/database db:generate",
+    "db:migrate": "pnpm --filter @megabot/database db:migrate:deploy",
     "tunnel": "npx ngrok http 3000"
   },
   "lint-staged": {
