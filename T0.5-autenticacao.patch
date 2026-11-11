@@ -1,0 +1,2669 @@
+diff --git a/.env.example b/.env.example
+index 3daaaa9..62ebb98 100644
+--- a/.env.example
++++ b/.env.example
+@@ -7,12 +7,30 @@ NODE_ENV=development
+ PORT=3000
+ 
+ # Database (PostgreSQL + pgvector)
+-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/megabot?schema=public
++DATABASE_URL=postgresql://megabot_app:megabot_pass@localhost:5432/megabot?schema=public
+ POSTGRES_USER=postgres
+ POSTGRES_PASSWORD=postgres
+ POSTGRES_DB=megabot
+ POSTGRES_PORT=5432
+ 
++# Autenticação (Better Auth) - API NestJS em PORT, web (Next.js) em 3001
++BETTER_AUTH_SECRET=troque-por-um-segredo-aleatorio-com-32-ou-mais-caracteres
++BETTER_AUTH_URL=http://localhost:3000
++WEB_URL=http://localhost:3001
++NEXT_PUBLIC_API_URL=http://localhost:3000
++
++# Login com Google (opcional: sem estas duas variáveis o botão fica desativado)
++# Crie em https://console.cloud.google.com/apis/credentials (veja o README)
++GOOGLE_CLIENT_ID=
++GOOGLE_CLIENT_SECRET=
++
++# E-mail (em dev usa o Mailpit do docker compose; caixa de entrada em http://localhost:8025)
++SMTP_HOST=localhost
++SMTP_PORT=1025
++MAIL_FROM="Megabot <no-reply@megabot.local>"
++# SMTP_USER=
++# SMTP_PASS=
++
+ # Fila / Redis (se utilizar para filas) ou Drizzle / BullMQ
+ # REDIS_URL=redis://localhost:6379
+ 
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index d8195ec..acfba74 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -81,6 +81,23 @@ jobs:
+       - name: Run Tests
+         run: pnpm test
+ 
++      # Os rollbacks devem ser aplicados na ORDEM INVERSA das migrations.
++      - name: Verify auth migrations rollback
++        run: |
++          psql "$APP_PG_URL" -v ON_ERROR_STOP=1 \
++            -f packages/database/prisma/migrations/20261110200100_memberships_user_lookup/rollback.sql
++          SELF=$(psql "$APP_PG_URL" -tAc "SELECT count(*) FROM pg_policies WHERE policyname = 'membership_self_select_policy'")
++          FUNC=$(psql "$APP_PG_URL" -tAc "SELECT count(*) FROM pg_proc WHERE proname = 'current_app_user_id'")
++          test "$SELF" = "0"
++          test "$FUNC" = "0"
++
++          psql "$APP_PG_URL" -v ON_ERROR_STOP=1 \
++            -f packages/database/prisma/migrations/20261110200000_auth_tables/rollback.sql
++          TABLES=$(psql "$APP_PG_URL" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_name IN ('sessions','accounts','verifications')")
++          COLS=$(psql "$APP_PG_URL" -tAc "SELECT count(*) FROM information_schema.columns WHERE table_name = 'users' AND column_name IN ('email_verified','image')")
++          test "$TABLES" = "0"
++          test "$COLS" = "0"
++
+       - name: Verify RLS rollback
+         run: |
+           psql "$APP_PG_URL" -v ON_ERROR_STOP=1 \
+@@ -119,4 +136,4 @@ jobs:
+           push: false
+           tags: megabot-${{ matrix.app }}:latest
+           cache-from: type=gha
+-          cache-to: type=gha,mode=max
+\ No newline at end of file
++          cache-to: type=gha,mode=max
+diff --git a/.gitignore b/.gitignore
+index 9b47973..9145637 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -2,3 +2,6 @@
+ .env
+ node_modules
+ packages/database/src/generated
++dist
++.next
++*.tsbuildinfo
+diff --git a/README.md b/README.md
+index e82c9ac..4c934c6 100644
+--- a/README.md
++++ b/README.md
+@@ -64,6 +64,36 @@ Os testes de integração usam o banco local. Antes de `pnpm test`, o container
+ 
+ ---
+ 
++## 🔐 Autenticação (Better Auth)
++
++A API (NestJS, porta `3000`) cuida da autenticação; o web (Next.js, porta `3001`) consome. Decisão em [docs/adr/0001-autenticacao.md](docs/adr/0001-autenticacao.md) e contrato em [docs/api/auth.md](docs/api/auth.md).
++
++### Subir tudo em dev
++
++```bash
++pnpm db:up          # Postgres + Mailpit (caixa de e-mail local)
++pnpm db:generate
++pnpm db:migrate
++pnpm dev            # API em :3000 e web em :3001
++```
++
++- Caixa de e-mail de desenvolvimento (verificação e recuperação de senha): http://localhost:8025
++- Defina `BETTER_AUTH_SECRET` no `.env` (mínimo 32 caracteres). Gere um com `openssl rand -base64 32`.
++
++### Login com Google (opcional)
++
++1. No [Google Cloud Console](https://console.cloud.google.com/apis/credentials), crie um **OAuth client ID** do tipo _Web application_.
++2. Em _Authorized redirect URIs_, adicione `http://localhost:3000/api/auth/callback/google`.
++3. Copie o Client ID e o Client Secret para `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET` no `.env` e reinicie a API.
++
++Sem essas variáveis o botão "Entrar com Google" mostra "indisponível" e o resto funciona normalmente.
++
++### Testes
++
++`pnpm test` roda em série (`--concurrency=1`) porque os pacotes compartilham o mesmo banco. O fluxo de autenticação é testado de ponta a ponta em `apps/api/tests/auth.test.ts`.
++
++---
++
+ ## 🔗 Configuração de Webhooks Locais (Túnel HTTP)
+ 
+ 1. **Inicie o túnel apontando para a porta da API (`3000`):**
+diff --git a/apps/api/Dockerfile b/apps/api/Dockerfile
+index c33d64f..0ba8c47 100644
+--- a/apps/api/Dockerfile
++++ b/apps/api/Dockerfile
+@@ -1,5 +1,5 @@
+ # Step 1: Base com pnpm habilitado via Corepack e PATH configurado
+-FROM node:20-alpine AS base
++FROM node:22-alpine AS base
+ ENV PNPM_HOME="/pnpm"
+ ENV PATH="$PNPM_HOME:$PNPM_HOME/bin:$PATH"
+ RUN corepack enable
+diff --git a/apps/api/eslint.config.mjs b/apps/api/eslint.config.mjs
+new file mode 100644
+index 0000000..1874eea
+--- /dev/null
++++ b/apps/api/eslint.config.mjs
+@@ -0,0 +1,3 @@
++import { nodeConfig } from '@megabot/eslint-config';
++
++export default [...nodeConfig];
+diff --git a/apps/api/package.json b/apps/api/package.json
+index 4f68fa3..4c0c924 100644
+--- a/apps/api/package.json
++++ b/apps/api/package.json
+@@ -3,7 +3,29 @@
+   "version": "1.0.0",
+   "private": true,
+   "scripts": {
+-    "build": "echo 'Build da API'",
+-    "start": "node index.js"
++    "dev": "tsx watch --env-file=../../.env src/main.ts",
++    "build": "swc src -d dist --strip-leading-paths --config-file ../../packages/config/swc/.swcrc -C module.type=commonjs",
++    "start": "node dist/main.js",
++    "lint": "eslint .",
++    "check-types": "tsc --noEmit",
++    "test": "node --env-file=../../.env --import tsx --test --test-concurrency=1 tests/**/*.test.ts"
++  },
++  "dependencies": {
++    "@megabot/database": "workspace:*",
++    "@nestjs/common": "^11.0.0",
++    "@nestjs/core": "^11.0.0",
++    "@nestjs/platform-express": "^11.0.0",
++    "better-auth": "^1.3.0",
++    "nodemailer": "^7.0.0",
++    "reflect-metadata": "^0.2.2",
++    "rxjs": "^7.8.1"
++  },
++  "devDependencies": {
++    "@megabot/tsconfig": "workspace:*",
++    "@types/express": "^5.0.0",
++    "@types/node": "^22.0.0",
++    "@types/nodemailer": "^6.4.17",
++    "tsx": "^4.19.0",
++    "typescript": "^5.0.0"
+   }
+ }
+diff --git a/apps/api/src/app.module.ts b/apps/api/src/app.module.ts
+new file mode 100644
+index 0000000..d11c4ad
+--- /dev/null
++++ b/apps/api/src/app.module.ts
+@@ -0,0 +1,26 @@
++import { type DynamicModule, Module } from '@nestjs/common';
++import { APP_GUARD } from '@nestjs/core';
++import type { AppConfig } from './config';
++import type { Mailer } from './mailer';
++import { AuthGuard } from './auth/auth.guard';
++import { AuthModule } from './auth/auth.module';
++import { HealthController } from './health.controller';
++import { MeController } from './me.controller';
++
++export interface AppModuleOptions {
++  config: AppConfig;
++  mailer?: Mailer;
++}
++
++@Module({})
++export class AppModule {
++  static register(options: AppModuleOptions): DynamicModule {
++    return {
++      module: AppModule,
++      imports: [AuthModule.register(options)],
++      controllers: [HealthController, MeController],
++      // Guard global: protege TODAS as rotas por padrão.
++      providers: [{ provide: APP_GUARD, useClass: AuthGuard }],
++    };
++  }
++}
+diff --git a/apps/api/src/auth/auth.context.ts b/apps/api/src/auth/auth.context.ts
+new file mode 100644
+index 0000000..02e5a85
+--- /dev/null
++++ b/apps/api/src/auth/auth.context.ts
+@@ -0,0 +1,18 @@
++import { createParamDecorator, type ExecutionContext } from '@nestjs/common';
++import type { Request } from 'express';
++
++export interface AuthContext {
++  user: { id: string; email: string; name: string; image?: string | null; emailVerified: boolean };
++  session: { id: string; expiresAt: Date };
++  /** Tenant ativo do usuário (null só se algo falhou no provisionamento). */
++  tenantId: string | null;
++  role: 'OWNER' | 'ADMIN' | 'MEMBER' | null;
++}
++
++export type AuthedRequest = Request & { auth?: AuthContext };
++
++/** Uso: `@CurrentAuth() auth: AuthContext` num método de controller. */
++export const CurrentAuth = createParamDecorator((_data: unknown, ctx: ExecutionContext) => {
++  const request = ctx.switchToHttp().getRequest<AuthedRequest>();
++  return request.auth;
++});
+diff --git a/apps/api/src/auth/auth.guard.ts b/apps/api/src/auth/auth.guard.ts
+new file mode 100644
+index 0000000..1ca9e71
+--- /dev/null
++++ b/apps/api/src/auth/auth.guard.ts
+@@ -0,0 +1,59 @@
++import {
++  type CanActivate,
++  type ExecutionContext,
++  Inject,
++  Injectable,
++  UnauthorizedException,
++} from '@nestjs/common';
++import { Reflector } from '@nestjs/core';
++import { fromNodeHeaders } from 'better-auth/node';
++import { listUserTenants } from '@megabot/database';
++import type { Auth } from './auth';
++import { AUTH } from './auth.tokens';
++import type { AuthedRequest } from './auth.context';
++import { IS_PUBLIC_KEY } from './public.decorator';
++
++/**
++ * Guard global: toda rota exige sessão, exceto as marcadas com @Public().
++ * Registrado como APP_GUARD no AppModule.
++ */
++@Injectable()
++export class AuthGuard implements CanActivate {
++  constructor(
++    @Inject(Reflector) private readonly reflector: Reflector,
++    @Inject(AUTH) private readonly auth: Auth,
++  ) {}
++
++  async canActivate(context: ExecutionContext): Promise<boolean> {
++    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
++      context.getHandler(),
++      context.getClass(),
++    ]);
++    if (isPublic) return true;
++
++    const request = context.switchToHttp().getRequest<AuthedRequest>();
++
++    // Lê o cookie de sessão, valida no banco e devolve usuário + sessão (ou null).
++    const result = await this.auth.api.getSession({
++      headers: fromNodeHeaders(request.headers),
++    });
++    if (!result) throw new UnauthorizedException('Sessão ausente ou expirada');
++
++    // Descobre o tenant do usuário (ver migration membership_self_select_policy).
++    const [active] = await listUserTenants(result.user.id);
++
++    request.auth = {
++      user: {
++        id: result.user.id,
++        email: result.user.email,
++        name: result.user.name,
++        image: result.user.image,
++        emailVerified: result.user.emailVerified,
++      },
++      session: { id: result.session.id, expiresAt: result.session.expiresAt },
++      tenantId: active?.tenantId ?? null,
++      role: active?.role ?? null,
++    };
++    return true;
++  }
++}
+diff --git a/apps/api/src/auth/auth.module.ts b/apps/api/src/auth/auth.module.ts
+new file mode 100644
+index 0000000..ab4b83c
+--- /dev/null
++++ b/apps/api/src/auth/auth.module.ts
+@@ -0,0 +1,29 @@
++import { type DynamicModule, Global, Module } from '@nestjs/common';
++import type { AppConfig } from '../config';
++import { createSmtpMailer, type Mailer } from '../mailer';
++import { createAuth } from './auth';
++import { APP_CONFIG, AUTH, MAILER } from './auth.tokens';
++
++export interface AuthModuleOptions {
++  config: AppConfig;
++  /** Permite trocar o mailer (testes). Por padrão usa SMTP. */
++  mailer?: Mailer;
++}
++
++@Global()
++@Module({})
++export class AuthModule {
++  static register({ config, mailer }: AuthModuleOptions): DynamicModule {
++    const resolvedMailer = mailer ?? createSmtpMailer(config.smtp);
++
++    return {
++      module: AuthModule,
++      providers: [
++        { provide: APP_CONFIG, useValue: config },
++        { provide: MAILER, useValue: resolvedMailer },
++        { provide: AUTH, useValue: createAuth({ config, mailer: resolvedMailer }) },
++      ],
++      exports: [APP_CONFIG, MAILER, AUTH],
++    };
++  }
++}
+diff --git a/apps/api/src/auth/auth.tokens.ts b/apps/api/src/auth/auth.tokens.ts
+new file mode 100644
+index 0000000..99db3d0
+--- /dev/null
++++ b/apps/api/src/auth/auth.tokens.ts
+@@ -0,0 +1,4 @@
++/** Tokens de injeção de dependência (evita depender de decorator metadata). */
++export const AUTH = Symbol('AUTH');
++export const MAILER = Symbol('MAILER');
++export const APP_CONFIG = Symbol('APP_CONFIG');
+diff --git a/apps/api/src/auth/auth.ts b/apps/api/src/auth/auth.ts
+new file mode 100644
+index 0000000..f473431
+--- /dev/null
++++ b/apps/api/src/auth/auth.ts
+@@ -0,0 +1,75 @@
++import { betterAuth } from 'better-auth';
++import { prismaAdapter } from 'better-auth/adapters/prisma';
++import { prisma, provisionTenantForUser } from '@megabot/database';
++import type { AppConfig } from '../config';
++import { resetPasswordEmail, verificationEmail, type Mailer } from '../mailer';
++
++/**
++ * Envia o e-mail sem bloquear a resposta (evita revelar, pelo tempo de resposta,
++ * se um e-mail existe) e sem derrubar o processo se o SMTP falhar.
++ */
++function sendInBackground(mailer: Mailer, message: Parameters<Mailer['send']>[0]): void {
++  mailer.send(message).catch((error) => {
++    console.error(`Falha ao enviar e-mail "${message.subject}" para ${message.to}:`, error);
++  });
++}
++
++export interface CreateAuthOptions {
++  config: AppConfig;
++  mailer: Mailer;
++}
++
++/**
++ * Cria a instância do Better Auth. É uma função (e não uma constante) para
++ * que os testes possam injetar um mailer falso e uma configuração própria.
++ */
++export function createAuth({ config, mailer }: CreateAuthOptions) {
++  return betterAuth({
++    baseURL: config.authUrl,
++    secret: config.authSecret,
++    // Só aceitamos requisições vindas do nosso front-end (proteção CSRF).
++    trustedOrigins: [config.webUrl],
++
++    // Usa o mesmo Prisma/Postgres do projeto. Os modelos User, Session, Account
++    // e Verification estão em packages/database/prisma/schema.prisma.
++    database: prismaAdapter(prisma, { provider: 'postgresql' }),
++
++    // Nossas colunas id são UUID (Postgres), então geramos UUID em vez do id padrão.
++    advanced: { database: { generateId: 'uuid' } },
++
++    emailAndPassword: {
++      enabled: true,
++      // Quem não confirmou o e-mail não consegue logar.
++      requireEmailVerification: true,
++      minPasswordLength: 8,
++      sendResetPassword: async ({ user, url }) => {
++        sendInBackground(mailer, { to: user.email, ...resetPasswordEmail(user.name, url) });
++      },
++    },
++
++    emailVerification: {
++      sendOnSignUp: true,
++      autoSignInAfterVerification: true,
++      sendVerificationEmail: async ({ user, url }) => {
++        sendInBackground(mailer, { to: user.email, ...verificationEmail(user.name, url) });
++      },
++    },
++
++    // Login com Google (só liga se as credenciais existirem).
++    socialProviders: config.google ? { google: config.google } : {},
++
++    databaseHooks: {
++      user: {
++        create: {
++          // Roda logo depois que o usuário é criado (cadastro com senha OU Google).
++          // Cria o tenant e a membership OWNER. É idempotente.
++          after: async (user) => {
++            await provisionTenantForUser({ id: user.id, name: user.name, email: user.email });
++          },
++        },
++      },
++    },
++  });
++}
++
++export type Auth = ReturnType<typeof createAuth>;
+diff --git a/apps/api/src/auth/public.decorator.ts b/apps/api/src/auth/public.decorator.ts
+new file mode 100644
+index 0000000..329239a
+--- /dev/null
++++ b/apps/api/src/auth/public.decorator.ts
+@@ -0,0 +1,6 @@
++import { SetMetadata } from '@nestjs/common';
++
++export const IS_PUBLIC_KEY = 'isPublic';
++
++/** Marca uma rota (ou controller) como pública: o AuthGuard não exige sessão. */
++export const Public = () => SetMetadata(IS_PUBLIC_KEY, true);
+diff --git a/apps/api/src/bootstrap.ts b/apps/api/src/bootstrap.ts
+new file mode 100644
+index 0000000..a85992e
+--- /dev/null
++++ b/apps/api/src/bootstrap.ts
+@@ -0,0 +1,31 @@
++import 'reflect-metadata';
++import { NestFactory } from '@nestjs/core';
++import type { NestExpressApplication } from '@nestjs/platform-express';
++import { toNodeHandler } from 'better-auth/node';
++import { AppModule, type AppModuleOptions } from './app.module';
++import type { Auth } from './auth/auth';
++import { AUTH } from './auth/auth.tokens';
++
++/**
++ * Monta a aplicação. Usado pelo main.ts e pelos testes.
++ */
++export async function createApp(options: AppModuleOptions): Promise<NestExpressApplication> {
++  // bodyParser: false -> o Better Auth precisa ler o corpo da requisição "cru".
++  // Reativamos o parser JSON logo abaixo, DEPOIS de registrar as rotas de auth.
++  const app = await NestFactory.create<NestExpressApplication>(AppModule.register(options), {
++    bodyParser: false,
++    logger: process.env.NODE_ENV === 'test' ? false : ['log', 'warn', 'error'],
++  });
++
++  // CORS: só o nosso front-end, com cookies (credentials).
++  app.enableCors({ origin: options.config.webUrl, credentials: true });
++
++  // Rotas de autenticação (/api/auth/*) são atendidas direto pelo Better Auth.
++  const auth = app.get<Auth>(AUTH);
++  app.getHttpAdapter().getInstance().all('/api/auth/*splat', toNodeHandler(auth));
++
++  // Para as demais rotas, o JSON volta a ser interpretado normalmente.
++  app.useBodyParser('json');
++
++  return app;
++}
+diff --git a/apps/api/src/config.ts b/apps/api/src/config.ts
+new file mode 100644
+index 0000000..0cdc252
+--- /dev/null
++++ b/apps/api/src/config.ts
+@@ -0,0 +1,49 @@
++/**
++ * Configuração da API, lida das variáveis de ambiente.
++ * Centralizar aqui evita `process.env.X` espalhado e dá erro claro se faltar algo.
++ */
++export interface AppConfig {
++  port: number;
++  /** URL pública da API (onde o Better Auth responde). Ex.: http://localhost:3000 */
++  authUrl: string;
++  /** URL do front-end (Next.js). Usada em CORS, redirects e links dos e-mails. */
++  webUrl: string;
++  /** Segredo usado para assinar/criptografar tokens e cookies (mín. 32 caracteres). */
++  authSecret: string;
++  /** Google é opcional: sem as duas variáveis, o botão "Entrar com Google" fica desativado. */
++  google?: { clientId: string; clientSecret: string };
++  smtp: { host: string; port: number; from: string; user?: string; pass?: string };
++}
++
++function required(env: NodeJS.ProcessEnv, key: string): string {
++  const value = env[key];
++  if (!value) throw new Error(`Variável de ambiente obrigatória ausente: ${key}`);
++  return value;
++}
++
++export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
++  const authSecret = required(env, 'BETTER_AUTH_SECRET');
++  if (authSecret.length < 32) {
++    throw new Error('BETTER_AUTH_SECRET precisa ter pelo menos 32 caracteres');
++  }
++
++  const port = Number(env.PORT ?? 3000);
++
++  return {
++    port,
++    authUrl: env.BETTER_AUTH_URL ?? `http://localhost:${port}`,
++    webUrl: env.WEB_URL ?? 'http://localhost:3001',
++    authSecret,
++    google:
++      env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET
++        ? { clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET }
++        : undefined,
++    smtp: {
++      host: env.SMTP_HOST ?? 'localhost',
++      port: Number(env.SMTP_PORT ?? 1025),
++      from: env.MAIL_FROM ?? 'Megabot <no-reply@megabot.local>',
++      user: env.SMTP_USER,
++      pass: env.SMTP_PASS,
++    },
++  };
++}
+diff --git a/apps/api/src/health.controller.ts b/apps/api/src/health.controller.ts
+new file mode 100644
+index 0000000..7cffe83
+--- /dev/null
++++ b/apps/api/src/health.controller.ts
+@@ -0,0 +1,11 @@
++import { Controller, Get } from '@nestjs/common';
++import { Public } from './auth/public.decorator';
++
++@Controller()
++export class HealthController {
++  @Public()
++  @Get('health')
++  health() {
++    return { status: 'ok' };
++  }
++}
+diff --git a/apps/api/src/mailer.ts b/apps/api/src/mailer.ts
+new file mode 100644
+index 0000000..93264e3
+--- /dev/null
++++ b/apps/api/src/mailer.ts
+@@ -0,0 +1,63 @@
++import nodemailer from 'nodemailer';
++import type { AppConfig } from './config';
++
++export interface MailMessage {
++  to: string;
++  subject: string;
++  html: string;
++  text: string;
++}
++
++/**
++ * Interface mínima de envio de e-mail. Em produção usamos SMTP (nodemailer);
++ * nos testes injetamos uma versão "falsa" que guarda as mensagens em memória.
++ */
++export interface Mailer {
++  send(message: MailMessage): Promise<void>;
++}
++
++export function createSmtpMailer(smtp: AppConfig['smtp']): Mailer {
++  const transport = nodemailer.createTransport({
++    host: smtp.host,
++    port: smtp.port,
++    secure: smtp.port === 465,
++    auth: smtp.user ? { user: smtp.user, pass: smtp.pass } : undefined,
++  });
++
++  return {
++    async send(message) {
++      await transport.sendMail({ from: smtp.from, ...message });
++    },
++  };
++}
++
++/** Mailer de teste: guarda tudo em `outbox`. */
++export function createMemoryMailer(): Mailer & { outbox: MailMessage[] } {
++  const outbox: MailMessage[] = [];
++  return {
++    outbox,
++    async send(message) {
++      outbox.push(message);
++    },
++  };
++}
++
++// ---------------------------------------------------------------------------
++// Templates (pt-BR)
++// ---------------------------------------------------------------------------
++
++export function verificationEmail(name: string, url: string): Omit<MailMessage, 'to'> {
++  return {
++    subject: 'Confirme seu e-mail - Megabot',
++    text: `Olá, ${name}! Confirme seu e-mail acessando: ${url}`,
++    html: `<p>Olá, ${name}!</p><p>Confirme seu e-mail clicando no link abaixo:</p><p><a href="${url}">Confirmar e-mail</a></p><p>Se você não criou uma conta, ignore esta mensagem.</p>`,
++  };
++}
++
++export function resetPasswordEmail(name: string, url: string): Omit<MailMessage, 'to'> {
++  return {
++    subject: 'Redefinição de senha - Megabot',
++    text: `Olá, ${name}! Para redefinir sua senha acesse: ${url}`,
++    html: `<p>Olá, ${name}!</p><p>Recebemos um pedido para redefinir sua senha:</p><p><a href="${url}">Redefinir senha</a></p><p>Se não foi você, ignore esta mensagem.</p>`,
++  };
++}
+diff --git a/apps/api/src/main.ts b/apps/api/src/main.ts
+new file mode 100644
+index 0000000..e2b2293
+--- /dev/null
++++ b/apps/api/src/main.ts
+@@ -0,0 +1,14 @@
++import { createApp } from './bootstrap';
++import { loadConfig } from './config';
++
++async function main() {
++  const config = loadConfig();
++  const app = await createApp({ config });
++  await app.listen(config.port);
++  console.info(`API rodando em ${config.authUrl}`);
++}
++
++main().catch((error) => {
++  console.error(error);
++  process.exit(1);
++});
+diff --git a/apps/api/src/me.controller.ts b/apps/api/src/me.controller.ts
+new file mode 100644
+index 0000000..0ff3db3
+--- /dev/null
++++ b/apps/api/src/me.controller.ts
+@@ -0,0 +1,14 @@
++import { Controller, Get } from '@nestjs/common';
++import { type AuthContext, CurrentAuth } from './auth/auth.context';
++
++@Controller()
++export class MeController {
++  /** Devolve quem está logado e a qual empresa (tenant) pertence. */
++  @Get('me')
++  me(@CurrentAuth() auth: AuthContext) {
++    return {
++      user: auth.user,
++      tenant: auth.tenantId ? { id: auth.tenantId, role: auth.role } : null,
++    };
++  }
++}
+diff --git a/apps/api/tests/auth.test.ts b/apps/api/tests/auth.test.ts
+new file mode 100644
+index 0000000..97451aa
+--- /dev/null
++++ b/apps/api/tests/auth.test.ts
+@@ -0,0 +1,231 @@
++import { describe, it, before, after } from 'node:test';
++import assert from 'node:assert/strict';
++import { listUserTenants, prisma } from '@megabot/database';
++import { cookieFrom, lastLink, startTestApp, waitForEmail, WEB_URL, type TestApp } from './helpers';
++
++const PASSWORD = 'senha-super-segura-123';
++
++describe('Autenticação (T0.5)', () => {
++  let t: TestApp;
++
++  before(async () => {
++    t = await startTestApp();
++  });
++  after(async () => {
++    await t.close();
++  });
++
++  describe('proteção das rotas (guard global)', () => {
++    it('GET /health é público', async () => {
++      const res = await t.api('/health');
++      assert.equal(res.status, 200);
++      assert.deepEqual(await res.json(), { status: 'ok' });
++    });
++
++    it('GET /me sem sessão retorna 401', async () => {
++      const res = await t.api('/me');
++      assert.equal(res.status, 401);
++    });
++
++    it('GET /me com cookie inválido retorna 401', async () => {
++      const res = await t.api('/me', { cookie: 'better-auth.session_token=invalido' });
++      assert.equal(res.status, 401);
++    });
++  });
++
++  describe('cadastro, verificação de e-mail e login', () => {
++    it('fluxo completo: cadastro -> login bloqueado -> verificar -> logado com tenant', async () => {
++      const email = t.newEmail('ana');
++
++      // 1. Cadastro
++      const signUp = await t.api('/api/auth/sign-up/email', {
++        body: { name: 'Ana Souza', email, password: PASSWORD, callbackURL: `${WEB_URL}/dashboard` },
++      });
++      assert.equal(signUp.status, 200);
++      // Ainda sem sessão: precisa verificar o e-mail antes.
++      assert.equal(signUp.headers.getSetCookie().length, 0);
++
++      // 2. Login bloqueado enquanto o e-mail não foi verificado
++      const blocked = await t.api('/api/auth/sign-in/email', {
++        body: { email, password: PASSWORD },
++      });
++      assert.equal(blocked.status, 403);
++
++      // 3. E-mail de verificação chegou; abrir o link verifica e já cria a sessão
++      await waitForEmail(t.mailer, email);
++      const verify = await t.api(lastLink(t.mailer, email).replace(t.baseUrl, ''));
++      assert.equal(verify.status, 302);
++      assert.ok(verify.headers.get('location')?.startsWith(`${WEB_URL}/dashboard`));
++      const cookie = cookieFrom(verify);
++      assert.ok(cookie.includes('session_token'));
++
++      // 4. /me devolve usuário + tenant OWNER (provisionado automaticamente)
++      const me = await t.api('/me', { cookie });
++      assert.equal(me.status, 200);
++      const body = (await me.json()) as {
++        user: { email: string; emailVerified: boolean };
++        tenant: { id: string; role: string } | null;
++      };
++      assert.equal(body.user.email, email);
++      assert.equal(body.user.emailVerified, true);
++      assert.equal(body.tenant?.role, 'OWNER');
++
++      // 5. Login normal agora funciona
++      const signIn = await t.api('/api/auth/sign-in/email', {
++        body: { email, password: PASSWORD },
++      });
++      assert.equal(signIn.status, 200);
++      assert.ok(cookieFrom(signIn).includes('session_token'));
++
++      // 6. Logout invalida a sessão
++      const out = await t.api('/api/auth/sign-out', { method: 'POST', body: {}, cookie });
++      assert.equal(out.status, 200);
++      assert.equal((await t.api('/me', { cookie })).status, 401);
++    });
++
++    it('o cadastro provisiona exatamente 1 tenant e 1 membership OWNER', async () => {
++      const email = t.newEmail('bruno');
++      await t.api('/api/auth/sign-up/email', {
++        body: { name: 'Bruno', email, password: PASSWORD },
++      });
++
++      const user = await prisma.user.findUniqueOrThrow({ where: { email } });
++      const tenants = await listUserTenants(user.id);
++      assert.equal(tenants.length, 1);
++      assert.equal(tenants[0].role, 'OWNER');
++    });
++
++    it('rejeita senha curta', async () => {
++      const res = await t.api('/api/auth/sign-up/email', {
++        body: { name: 'X', email: t.newEmail('curta'), password: '123' },
++      });
++      assert.equal(res.status, 400);
++    });
++
++    it('rejeita senha incorreta', async () => {
++      const email = t.newEmail('carla');
++      await t.api('/api/auth/sign-up/email', {
++        body: { name: 'Carla', email, password: PASSWORD },
++      });
++      await waitForEmail(t.mailer, email);
++      await t.api(lastLink(t.mailer, email).replace(t.baseUrl, ''));
++
++      const res = await t.api('/api/auth/sign-in/email', {
++        body: { email, password: 'errada-errada' },
++      });
++      assert.equal(res.status, 401);
++    });
++  });
++
++  describe('recuperação de senha', () => {
++    it('fluxo completo: pedir -> link -> nova senha -> login com a nova', async () => {
++      const email = t.newEmail('diego');
++      const newPassword = 'outra-senha-bem-forte-456';
++
++      await t.api('/api/auth/sign-up/email', {
++        body: { name: 'Diego', email, password: PASSWORD },
++      });
++      await waitForEmail(t.mailer, email);
++      await t.api(lastLink(t.mailer, email).replace(t.baseUrl, '')); // verifica o e-mail
++      t.mailer.outbox.length = 0;
++
++      // 1. Pede a redefinição
++      const request = await t.api('/api/auth/request-password-reset', {
++        body: { email, redirectTo: `${WEB_URL}/reset-password` },
++      });
++      assert.equal(request.status, 200);
++
++      // 2. Abre o link do e-mail: redireciona para o front com o token na URL
++      await waitForEmail(t.mailer, email);
++      const link = await t.api(lastLink(t.mailer, email).replace(t.baseUrl, ''));
++      assert.equal(link.status, 302);
++      const location = new URL(link.headers.get('location') as string);
++      assert.equal(`${location.origin}${location.pathname}`, `${WEB_URL}/reset-password`);
++      const token = location.searchParams.get('token');
++      assert.ok(token);
++
++      // 3. Define a nova senha
++      const reset = await t.api('/api/auth/reset-password', { body: { newPassword, token } });
++      assert.equal(reset.status, 200);
++
++      // 4. Senha antiga não funciona mais; a nova sim
++      const oldLogin = await t.api('/api/auth/sign-in/email', {
++        body: { email, password: PASSWORD },
++      });
++      assert.equal(oldLogin.status, 401);
++      const newLogin = await t.api('/api/auth/sign-in/email', {
++        body: { email, password: newPassword },
++      });
++      assert.equal(newLogin.status, 200);
++    });
++
++    it('não revela se o e-mail existe', async () => {
++      const res = await t.api('/api/auth/request-password-reset', {
++        body: { email: t.newEmail('inexistente'), redirectTo: `${WEB_URL}/reset-password` },
++      });
++      assert.equal(res.status, 200);
++    });
++  });
++
++  describe('login com Google', () => {
++    it('inicia o OAuth redirecionando para o Google com o redirect_uri correto', async () => {
++      const res = await t.api('/api/auth/sign-in/social', {
++        body: { provider: 'google', callbackURL: `${WEB_URL}/dashboard` },
++      });
++      assert.equal(res.status, 200);
++      const { url } = (await res.json()) as { url: string };
++      const target = new URL(url);
++
++      assert.equal(target.host, 'accounts.google.com');
++      assert.equal(target.searchParams.get('client_id'), 'test-google-client-id');
++      assert.equal(
++        target.searchParams.get('redirect_uri'),
++        `${t.baseUrl}/api/auth/callback/google`,
++      );
++    });
++  });
++
++  describe('CORS e CSRF', () => {
++    it('libera o front-end configurado, com credenciais', async () => {
++      const res = await t.api('/health', { origin: WEB_URL });
++      assert.equal(res.headers.get('access-control-allow-origin'), WEB_URL);
++      assert.equal(res.headers.get('access-control-allow-credentials'), 'true');
++    });
++
++    it('não libera outras origens', async () => {
++      const res = await t.api('/health', { origin: 'https://evil.example' });
++      assert.notEqual(res.headers.get('access-control-allow-origin'), 'https://evil.example');
++    });
++
++    it('rotas de auth também respondem ao preflight do front', async () => {
++      const res = await fetch(`${t.baseUrl}/api/auth/sign-in/email`, {
++        method: 'OPTIONS',
++        headers: { Origin: WEB_URL, 'Access-Control-Request-Method': 'POST' },
++      });
++      assert.ok(res.status === 204 || res.status === 200);
++      assert.equal(res.headers.get('access-control-allow-origin'), WEB_URL);
++    });
++  });
++
++  describe('resiliência', () => {
++    it('cadastro continua funcionando (e o processo não cai) se o SMTP falhar', async () => {
++      const broken = await startTestApp({
++        mailer: {
++          send: async () => {
++            throw new Error('SMTP fora do ar');
++          },
++        },
++      });
++      try {
++        const res = await broken.api('/api/auth/sign-up/email', {
++          body: { name: 'Eva', email: broken.newEmail('eva'), password: PASSWORD },
++        });
++        assert.equal(res.status, 200);
++        await new Promise((r) => setTimeout(r, 100)); // dá tempo para a rejeição (tratada) acontecer
++        assert.equal((await broken.api('/health')).status, 200);
++      } finally {
++        await broken.close();
++      }
++    });
++  });
++});
+diff --git a/apps/api/tests/helpers.ts b/apps/api/tests/helpers.ts
+new file mode 100644
+index 0000000..bc53f25
+--- /dev/null
++++ b/apps/api/tests/helpers.ts
+@@ -0,0 +1,119 @@
++import { createServer } from 'node:net';
++import { randomUUID } from 'node:crypto';
++import type { NestExpressApplication } from '@nestjs/platform-express';
++import { listUserTenants, prisma } from '@megabot/database';
++import { createApp } from '../src/bootstrap';
++import type { AppConfig } from '../src/config';
++import { createMemoryMailer, type Mailer } from '../src/mailer';
++
++export const WEB_URL = 'http://localhost:3001';
++
++async function freePort(): Promise<number> {
++  return new Promise((resolve, reject) => {
++    const server = createServer();
++    server.listen(0, () => {
++      const { port } = server.address() as { port: number };
++      server.close(() => resolve(port));
++    });
++    server.on('error', reject);
++  });
++}
++
++export interface TestApp {
++  baseUrl: string;
++  mailer: ReturnType<typeof createMemoryMailer>;
++  app: NestExpressApplication;
++  /** fetch já apontando para a API, com Origin do front e cookie opcional. */
++  api: (
++    path: string,
++    init?: {
++      method?: string;
++      body?: unknown;
++      cookie?: string;
++      origin?: string;
++      redirect?: RequestRedirect;
++    },
++  ) => Promise<Response>;
++  /** Cria um e-mail único para o teste e registra para limpeza. */
++  newEmail: (label: string) => string;
++  close: () => Promise<void>;
++}
++
++export async function startTestApp(options: { mailer?: Mailer } = {}): Promise<TestApp> {
++  const port = await freePort();
++  const baseUrl = `http://localhost:${port}`;
++  const config: AppConfig = {
++    port,
++    authUrl: baseUrl,
++    webUrl: WEB_URL,
++    authSecret: 'test-secret-test-secret-test-secret-123456',
++    google: { clientId: 'test-google-client-id', clientSecret: 'test-google-client-secret' },
++    smtp: { host: 'localhost', port: 1025, from: 'test@megabot.local' },
++  };
++  const mailer = createMemoryMailer();
++  const app = await createApp({ config, mailer: options.mailer ?? mailer });
++  await app.listen(port);
++
++  const run = randomUUID().slice(0, 8);
++  const emails: string[] = [];
++
++  return {
++    baseUrl,
++    mailer,
++    app,
++    newEmail: (label) => {
++      const email = `${label}-${run}@auth.test`;
++      emails.push(email);
++      return email;
++    },
++    api: (path, init = {}) =>
++      fetch(`${baseUrl}${path}`, {
++        method: init.method ?? (init.body ? 'POST' : 'GET'),
++        redirect: init.redirect ?? 'manual',
++        headers: {
++          Origin: init.origin ?? WEB_URL,
++          ...(init.body ? { 'Content-Type': 'application/json' } : {}),
++          ...(init.cookie ? { Cookie: init.cookie } : {}),
++        },
++        body: init.body ? JSON.stringify(init.body) : undefined,
++      }),
++    close: async () => {
++      // Remove só o que este teste criou (sem TRUNCATE).
++      const users = await prisma.user.findMany({ where: { email: { in: emails } } });
++      for (const user of users) {
++        const tenants = await listUserTenants(user.id);
++        await prisma.tenant.deleteMany({ where: { id: { in: tenants.map((t) => t.tenantId) } } });
++      }
++      await prisma.user.deleteMany({ where: { email: { in: emails } } });
++      await app.close();
++      await prisma.$disconnect();
++    },
++  };
++}
++
++/** Extrai o primeiro link http(s) do corpo de texto do último e-mail enviado. */
++export function lastLink(mailer: TestApp['mailer'], to: string): string {
++  const message = [...mailer.outbox].reverse().find((m) => m.to === to);
++  if (!message) throw new Error(`Nenhum e-mail enviado para ${to}`);
++  const match = message.text.match(/https?:\/\/\S+/);
++  if (!match) throw new Error('Nenhum link encontrado no e-mail');
++  return match[0];
++}
++
++/** Converte os Set-Cookie de uma resposta no valor do header Cookie. */
++export function cookieFrom(response: Response): string {
++  return response.headers
++    .getSetCookie()
++    .map((c) => c.split(';')[0])
++    .join('; ');
++}
++
++/** Aguarda o e-mail (o envio é "fire and forget" no Better Auth). */
++export async function waitForEmail(mailer: TestApp['mailer'], to: string, timeoutMs = 3000) {
++  const start = Date.now();
++  while (Date.now() - start < timeoutMs) {
++    if (mailer.outbox.some((m) => m.to === to)) return;
++    await new Promise((r) => setTimeout(r, 25));
++  }
++  throw new Error(`Timeout esperando e-mail para ${to}`);
++}
+diff --git a/apps/api/tsconfig.json b/apps/api/tsconfig.json
+new file mode 100644
+index 0000000..d2c9366
+--- /dev/null
++++ b/apps/api/tsconfig.json
+@@ -0,0 +1,13 @@
++{
++  "extends": "@megabot/tsconfig/base.json",
++  "compilerOptions": {
++    "module": "ESNext",
++    "moduleResolution": "Bundler",
++    "strict": true,
++    "experimentalDecorators": true,
++    "emitDecoratorMetadata": true,
++    "noEmit": true,
++    "types": ["node"]
++  },
++  "include": ["src/**/*", "tests/**/*"]
++}
+diff --git a/apps/web/eslint.config.mjs b/apps/web/eslint.config.mjs
+new file mode 100644
+index 0000000..bf6831a
+--- /dev/null
++++ b/apps/web/eslint.config.mjs
+@@ -0,0 +1,3 @@
++import { baseConfig } from '@megabot/eslint-config';
++
++export default [...baseConfig, { ignores: ['.next/**', 'next-env.d.ts'] }];
+diff --git a/apps/web/next-env.d.ts b/apps/web/next-env.d.ts
+new file mode 100644
+index 0000000..830fb59
+--- /dev/null
++++ b/apps/web/next-env.d.ts
+@@ -0,0 +1,6 @@
++/// <reference types="next" />
++/// <reference types="next/image-types/global" />
++/// <reference path="./.next/types/routes.d.ts" />
++
++// NOTE: This file should not be edited
++// see https://nextjs.org/docs/app/api-reference/config/typescript for more information.
+diff --git a/apps/web/next.config.ts b/apps/web/next.config.ts
+new file mode 100644
+index 0000000..2264431
+--- /dev/null
++++ b/apps/web/next.config.ts
+@@ -0,0 +1,13 @@
++import { existsSync } from 'node:fs';
++import path from 'node:path';
++import type { NextConfig } from 'next';
++
++// Reaproveita o .env da raiz do monorepo (mesmo padrão do prisma.config.ts).
++const rootEnv = path.resolve(process.cwd(), '../../.env');
++if (existsSync(rootEnv)) process.loadEnvFile(rootEnv);
++
++const nextConfig: NextConfig = {
++  reactStrictMode: true,
++};
++
++export default nextConfig;
+diff --git a/apps/web/package.json b/apps/web/package.json
+new file mode 100644
+index 0000000..4711b50
+--- /dev/null
++++ b/apps/web/package.json
+@@ -0,0 +1,25 @@
++{
++  "name": "@megabot/web",
++  "version": "1.0.0",
++  "private": true,
++  "scripts": {
++    "dev": "next dev -p 3001",
++    "build": "next build",
++    "start": "next start -p 3001",
++    "lint": "eslint .",
++    "check-types": "tsc --noEmit"
++  },
++  "dependencies": {
++    "better-auth": "^1.3.0",
++    "next": "^15.5.0",
++    "react": "^19.0.0",
++    "react-dom": "^19.0.0"
++  },
++  "devDependencies": {
++    "@megabot/tsconfig": "workspace:*",
++    "@types/node": "^22.0.0",
++    "@types/react": "^19.0.0",
++    "@types/react-dom": "^19.0.0",
++    "typescript": "^5.0.0"
++  }
++}
+diff --git a/apps/web/src/app/dashboard/page.tsx b/apps/web/src/app/dashboard/page.tsx
+new file mode 100644
+index 0000000..18dd39d
+--- /dev/null
++++ b/apps/web/src/app/dashboard/page.tsx
+@@ -0,0 +1,26 @@
++import { redirect } from 'next/navigation';
++import { AuthCard } from '@/components/auth-card';
++import { SignOutButton } from '@/components/sign-out-button';
++import { getMe } from '@/lib/server-session';
++
++export default async function DashboardPage() {
++  // Validação real da sessão (o middleware só checou se o cookie existe).
++  const me = await getMe();
++  if (!me) redirect('/sign-in');
++
++  return (
++    <AuthCard title={`Olá, ${me.user.name}!`} subtitle="Você está logado.">
++      <dl>
++        <dt>E-mail</dt>
++        <dd>{me.user.email}</dd>
++        <dt>Verificado</dt>
++        <dd>{me.user.emailVerified ? 'Sim' : 'Não'}</dd>
++        <dt>Empresa (tenant)</dt>
++        <dd>{me.tenant?.id ?? '—'}</dd>
++        <dt>Papel</dt>
++        <dd>{me.tenant?.role ?? '—'}</dd>
++      </dl>
++      <SignOutButton />
++    </AuthCard>
++  );
++}
+diff --git a/apps/web/src/app/forgot-password/page.tsx b/apps/web/src/app/forgot-password/page.tsx
+new file mode 100644
+index 0000000..f8bd61c
+--- /dev/null
++++ b/apps/web/src/app/forgot-password/page.tsx
+@@ -0,0 +1,13 @@
++import { AuthCard } from '@/components/auth-card';
++import { ForgotPasswordForm } from '@/components/forgot-password-form';
++
++export default function ForgotPasswordPage() {
++  return (
++    <AuthCard title="Recuperar senha" subtitle="Informe seu e-mail para receber o link.">
++      <ForgotPasswordForm />
++      <p className="footer">
++        <a href="/sign-in">Voltar para o login</a>
++      </p>
++    </AuthCard>
++  );
++}
+diff --git a/apps/web/src/app/globals.css b/apps/web/src/app/globals.css
+new file mode 100644
+index 0000000..dc72f44
+--- /dev/null
++++ b/apps/web/src/app/globals.css
+@@ -0,0 +1,155 @@
++:root {
++  --bg: #f6f7f9;
++  --card: #ffffff;
++  --text: #14181f;
++  --muted: #5b6573;
++  --border: #d9dee6;
++  --accent: #2f5bea;
++  --accent-text: #ffffff;
++  --danger: #c0392b;
++  --ok: #1e8e5a;
++}
++
++@media (prefers-color-scheme: dark) {
++  :root {
++    --bg: #0e1116;
++    --card: #171b22;
++    --text: #e8ecf2;
++    --muted: #9aa5b5;
++    --border: #2a313c;
++    --accent: #6c8cff;
++    --accent-text: #0e1116;
++    --danger: #ff7a6b;
++    --ok: #4cd08c;
++  }
++}
++
++* {
++  box-sizing: border-box;
++}
++
++body {
++  margin: 0;
++  min-height: 100vh;
++  display: grid;
++  place-items: center;
++  padding: 16px;
++  background: var(--bg);
++  color: var(--text);
++  font-family:
++    system-ui,
++    -apple-system,
++    'Segoe UI',
++    Roboto,
++    sans-serif;
++  line-height: 1.5;
++}
++
++.card {
++  width: 100%;
++  max-width: 400px;
++  padding: 28px;
++  background: var(--card);
++  border: 1px solid var(--border);
++  border-radius: 12px;
++}
++
++.card h1 {
++  margin: 0 0 4px;
++  font-size: 1.4rem;
++}
++.card .subtitle {
++  margin: 0 0 20px;
++  color: var(--muted);
++  font-size: 0.95rem;
++}
++
++form {
++  display: grid;
++  gap: 14px;
++}
++label {
++  display: grid;
++  gap: 6px;
++  font-size: 0.9rem;
++  font-weight: 500;
++}
++
++input {
++  padding: 10px 12px;
++  font: inherit;
++  color: inherit;
++  background: transparent;
++  border: 1px solid var(--border);
++  border-radius: 8px;
++}
++input:focus {
++  outline: 2px solid var(--accent);
++  outline-offset: 1px;
++}
++
++button {
++  padding: 10px 14px;
++  font: inherit;
++  font-weight: 600;
++  cursor: pointer;
++  border-radius: 8px;
++  border: 1px solid var(--border);
++  background: transparent;
++  color: inherit;
++}
++button.primary {
++  background: var(--accent);
++  color: var(--accent-text);
++  border-color: var(--accent);
++}
++button:disabled {
++  opacity: 0.6;
++  cursor: not-allowed;
++}
++
++.link-button {
++  padding: 0;
++  border: 0;
++  color: var(--accent);
++  font-weight: 500;
++}
++.divider {
++  text-align: center;
++  color: var(--muted);
++  font-size: 0.85rem;
++  margin: 4px 0;
++}
++.error {
++  margin: 0;
++  color: var(--danger);
++  font-size: 0.9rem;
++}
++.success {
++  margin: 0;
++  color: var(--ok);
++  font-size: 0.95rem;
++}
++.footer {
++  margin: 18px 0 0;
++  text-align: center;
++  color: var(--muted);
++  font-size: 0.9rem;
++}
++a {
++  color: var(--accent);
++}
++dl {
++  display: grid;
++  grid-template-columns: auto 1fr;
++  gap: 6px 14px;
++  margin: 0 0 20px;
++  font-size: 0.95rem;
++}
++dt {
++  color: var(--muted);
++}
++dd {
++  margin: 0;
++  word-break: break-all;
++}
+diff --git a/apps/web/src/app/layout.tsx b/apps/web/src/app/layout.tsx
+new file mode 100644
+index 0000000..08e7f63
+--- /dev/null
++++ b/apps/web/src/app/layout.tsx
+@@ -0,0 +1,16 @@
++import type { Metadata } from 'next';
++import type { ReactNode } from 'react';
++import './globals.css';
++
++export const metadata: Metadata = {
++  title: 'Megabot',
++  description: 'Megabot',
++};
++
++export default function RootLayout({ children }: { children: ReactNode }) {
++  return (
++    <html lang="pt-BR">
++      <body>{children}</body>
++    </html>
++  );
++}
+diff --git a/apps/web/src/app/page.tsx b/apps/web/src/app/page.tsx
+new file mode 100644
+index 0000000..f889cb6
+--- /dev/null
++++ b/apps/web/src/app/page.tsx
+@@ -0,0 +1,5 @@
++import { redirect } from 'next/navigation';
++
++export default function Home() {
++  redirect('/dashboard');
++}
+diff --git a/apps/web/src/app/reset-password/page.tsx b/apps/web/src/app/reset-password/page.tsx
+new file mode 100644
+index 0000000..b31d7a7
+--- /dev/null
++++ b/apps/web/src/app/reset-password/page.tsx
+@@ -0,0 +1,27 @@
++import { AuthCard } from '@/components/auth-card';
++import { ResetPasswordForm } from '@/components/reset-password-form';
++
++export default async function ResetPasswordPage({
++  searchParams,
++}: {
++  searchParams: Promise<{ token?: string; error?: string }>;
++}) {
++  const { token, error } = await searchParams;
++
++  // O Better Auth redireciona para cá com ?token=... (válido) ou ?error=INVALID_TOKEN.
++  if (!token || error) {
++    return (
++      <AuthCard title="Link inválido" subtitle="Este link expirou ou já foi usado.">
++        <p className="footer">
++          <a href="/forgot-password">Pedir um novo link</a>
++        </p>
++      </AuthCard>
++    );
++  }
++
++  return (
++    <AuthCard title="Nova senha" subtitle="Escolha uma nova senha para sua conta.">
++      <ResetPasswordForm token={token} />
++    </AuthCard>
++  );
++}
+diff --git a/apps/web/src/app/sign-in/page.tsx b/apps/web/src/app/sign-in/page.tsx
+new file mode 100644
+index 0000000..6c09f1e
+--- /dev/null
++++ b/apps/web/src/app/sign-in/page.tsx
+@@ -0,0 +1,18 @@
++import { redirect } from 'next/navigation';
++import { AuthCard } from '@/components/auth-card';
++import { SignInForm } from '@/components/sign-in-form';
++import { getMe, safeNext } from '@/lib/server-session';
++
++export default async function SignInPage({
++  searchParams,
++}: {
++  searchParams: Promise<{ next?: string }>;
++}) {
++  const { next } = await searchParams;
++  if (await getMe()) redirect(safeNext(next));
++  return (
++    <AuthCard title="Entrar" subtitle="Acesse sua conta.">
++      <SignInForm next={safeNext(next)} />
++    </AuthCard>
++  );
++}
+diff --git a/apps/web/src/app/sign-up/page.tsx b/apps/web/src/app/sign-up/page.tsx
+new file mode 100644
+index 0000000..498abe7
+--- /dev/null
++++ b/apps/web/src/app/sign-up/page.tsx
+@@ -0,0 +1,13 @@
++import { redirect } from 'next/navigation';
++import { AuthCard } from '@/components/auth-card';
++import { SignUpForm } from '@/components/sign-up-form';
++import { getMe } from '@/lib/server-session';
++
++export default async function SignUpPage() {
++  if (await getMe()) redirect('/dashboard');
++  return (
++    <AuthCard title="Criar conta" subtitle="Comece a usar o Megabot.">
++      <SignUpForm />
++    </AuthCard>
++  );
++}
+diff --git a/apps/web/src/app/verify-email/page.tsx b/apps/web/src/app/verify-email/page.tsx
+new file mode 100644
+index 0000000..c1704f8
+--- /dev/null
++++ b/apps/web/src/app/verify-email/page.tsx
+@@ -0,0 +1,33 @@
++import { redirect } from 'next/navigation';
++import { AuthCard } from '@/components/auth-card';
++import { getMe } from '@/lib/server-session';
++
++/**
++ * Destino do link do e-mail de confirmação.
++ * - Sucesso: o Better Auth já criou a sessão -> mandamos para o dashboard.
++ * - Falha: chega com ?error=... -> mostramos aviso.
++ */
++export default async function VerifyEmailPage({
++  searchParams,
++}: {
++  searchParams: Promise<{ error?: string }>;
++}) {
++  const { error } = await searchParams;
++
++  if (!error && (await getMe())) redirect('/dashboard');
++
++  return (
++    <AuthCard
++      title={error ? 'Link inválido' : 'Verifique seu e-mail'}
++      subtitle={
++        error
++          ? 'O link de confirmação expirou ou já foi usado.'
++          : 'Abra o link que enviamos para ativar sua conta.'
++      }
++    >
++      <p className="footer">
++        <a href="/sign-in">Ir para o login</a>
++      </p>
++    </AuthCard>
++  );
++}
+diff --git a/apps/web/src/components/auth-card.tsx b/apps/web/src/components/auth-card.tsx
+new file mode 100644
+index 0000000..98f2a92
+--- /dev/null
++++ b/apps/web/src/components/auth-card.tsx
+@@ -0,0 +1,19 @@
++import type { ReactNode } from 'react';
++
++export function AuthCard({
++  title,
++  subtitle,
++  children,
++}: {
++  title: string;
++  subtitle?: string;
++  children: ReactNode;
++}) {
++  return (
++    <main className="card">
++      <h1>{title}</h1>
++      {subtitle ? <p className="subtitle">{subtitle}</p> : null}
++      {children}
++    </main>
++  );
++}
+diff --git a/apps/web/src/components/forgot-password-form.tsx b/apps/web/src/components/forgot-password-form.tsx
+new file mode 100644
+index 0000000..a69cb1a
+--- /dev/null
++++ b/apps/web/src/components/forgot-password-form.tsx
+@@ -0,0 +1,45 @@
++'use client';
++
++import { type FormEvent, useState } from 'react';
++import { authClient } from '@/lib/auth-client';
++
++export function ForgotPasswordForm() {
++  const [sent, setSent] = useState(false);
++  const [loading, setLoading] = useState(false);
++
++  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
++    event.preventDefault();
++    setLoading(true);
++    const form = new FormData(event.currentTarget);
++
++    await authClient.requestPasswordReset({
++      email: String(form.get('email')),
++      // Página para onde o link do e-mail leva (com ?token=... na URL).
++      redirectTo: `${window.location.origin}/reset-password`,
++    });
++
++    setLoading(false);
++    // Mensagem igual exista ou não a conta (não revela quais e-mails estão cadastrados).
++    setSent(true);
++  }
++
++  if (sent) {
++    return (
++      <p className="success">
++        Se este e-mail estiver cadastrado, você receberá um link para redefinir a senha.
++      </p>
++    );
++  }
++
++  return (
++    <form onSubmit={handleSubmit}>
++      <label>
++        E-mail
++        <input name="email" type="email" autoComplete="email" required />
++      </label>
++      <button className="primary" type="submit" disabled={loading}>
++        {loading ? 'Enviando...' : 'Enviar link'}
++      </button>
++    </form>
++  );
++}
+diff --git a/apps/web/src/components/google-button.tsx b/apps/web/src/components/google-button.tsx
+new file mode 100644
+index 0000000..76c8c15
+--- /dev/null
++++ b/apps/web/src/components/google-button.tsx
+@@ -0,0 +1,27 @@
++'use client';
++
++import { useState } from 'react';
++import { authClient } from '@/lib/auth-client';
++
++export function GoogleButton({ label = 'Continuar com Google' }: { label?: string }) {
++  const [error, setError] = useState<string | null>(null);
++
++  async function handleClick() {
++    setError(null);
++    // O Better Auth redireciona o navegador para o Google e, depois do login, de volta para callbackURL.
++    const { error } = await authClient.signIn.social({
++      provider: 'google',
++      callbackURL: `${window.location.origin}/dashboard`,
++    });
++    if (error) setError('Login com Google indisponível no momento.');
++  }
++
++  return (
++    <>
++      <button type="button" onClick={handleClick}>
++        {label}
++      </button>
++      {error ? <p className="error">{error}</p> : null}
++    </>
++  );
++}
+diff --git a/apps/web/src/components/resend-verification-button.tsx b/apps/web/src/components/resend-verification-button.tsx
+new file mode 100644
+index 0000000..5b3147e
+--- /dev/null
++++ b/apps/web/src/components/resend-verification-button.tsx
+@@ -0,0 +1,23 @@
++'use client';
++
++import { useState } from 'react';
++import { authClient } from '@/lib/auth-client';
++
++export function ResendVerificationButton({ email }: { email: string }) {
++  const [sent, setSent] = useState(false);
++
++  async function handleClick() {
++    await authClient.sendVerificationEmail({
++      email,
++      callbackURL: `${window.location.origin}/verify-email`,
++    });
++    setSent(true);
++  }
++
++  if (sent) return <p className="success">Enviamos um novo e-mail de confirmação.</p>;
++  return (
++    <button type="button" className="link-button" onClick={handleClick}>
++      Reenviar e-mail de confirmação
++    </button>
++  );
++}
+diff --git a/apps/web/src/components/reset-password-form.tsx b/apps/web/src/components/reset-password-form.tsx
+new file mode 100644
+index 0000000..740f557
+--- /dev/null
++++ b/apps/web/src/components/reset-password-form.tsx
+@@ -0,0 +1,51 @@
++'use client';
++
++import { type FormEvent, useState } from 'react';
++import { authClient } from '@/lib/auth-client';
++import { authErrorMessage } from '@/lib/auth-errors';
++
++export function ResetPasswordForm({ token }: { token: string }) {
++  const [error, setError] = useState<string | null>(null);
++  const [done, setDone] = useState(false);
++  const [loading, setLoading] = useState(false);
++
++  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
++    event.preventDefault();
++    setError(null);
++    setLoading(true);
++    const form = new FormData(event.currentTarget);
++
++    const { error } = await authClient.resetPassword({
++      newPassword: String(form.get('password')),
++      token,
++    });
++
++    setLoading(false);
++    if (error) return setError(authErrorMessage(error));
++    setDone(true);
++  }
++
++  if (done) {
++    return (
++      <>
++        <p className="success">Senha alterada com sucesso.</p>
++        <p className="footer">
++          <a href="/sign-in">Entrar</a>
++        </p>
++      </>
++    );
++  }
++
++  return (
++    <form onSubmit={handleSubmit}>
++      <label>
++        Nova senha (mín. 8 caracteres)
++        <input name="password" type="password" autoComplete="new-password" minLength={8} required />
++      </label>
++      {error ? <p className="error">{error}</p> : null}
++      <button className="primary" type="submit" disabled={loading}>
++        {loading ? 'Salvando...' : 'Salvar nova senha'}
++      </button>
++    </form>
++  );
++}
+diff --git a/apps/web/src/components/sign-in-form.tsx b/apps/web/src/components/sign-in-form.tsx
+new file mode 100644
+index 0000000..383e852
+--- /dev/null
++++ b/apps/web/src/components/sign-in-form.tsx
+@@ -0,0 +1,67 @@
++'use client';
++
++import { type FormEvent, useState } from 'react';
++import { useRouter } from 'next/navigation';
++import { authClient } from '@/lib/auth-client';
++import { authErrorMessage } from '@/lib/auth-errors';
++import { GoogleButton } from './google-button';
++import { ResendVerificationButton } from './resend-verification-button';
++
++export function SignInForm({ next }: { next: string }) {
++  const router = useRouter();
++  const [error, setError] = useState<string | null>(null);
++  const [unverifiedEmail, setUnverifiedEmail] = useState<string | null>(null);
++  const [loading, setLoading] = useState(false);
++
++  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
++    event.preventDefault();
++    setError(null);
++    setUnverifiedEmail(null);
++    setLoading(true);
++
++    const form = new FormData(event.currentTarget);
++    const email = String(form.get('email'));
++
++    const { error } = await authClient.signIn.email({
++      email,
++      password: String(form.get('password')),
++    });
++
++    setLoading(false);
++    if (error) {
++      if (error.code === 'EMAIL_NOT_VERIFIED') setUnverifiedEmail(email);
++      return setError(authErrorMessage(error));
++    }
++
++    router.push(next);
++    router.refresh();
++  }
++
++  return (
++    <>
++      <form onSubmit={handleSubmit}>
++        <label>
++          E-mail
++          <input name="email" type="email" autoComplete="email" required />
++        </label>
++        <label>
++          Senha
++          <input name="password" type="password" autoComplete="current-password" required />
++        </label>
++        {error ? <p className="error">{error}</p> : null}
++        {unverifiedEmail ? <ResendVerificationButton email={unverifiedEmail} /> : null}
++        <button className="primary" type="submit" disabled={loading}>
++          {loading ? 'Entrando...' : 'Entrar'}
++        </button>
++      </form>
++      <p className="footer">
++        <a href="/forgot-password">Esqueci minha senha</a>
++      </p>
++      <p className="divider">ou</p>
++      <GoogleButton label="Entrar com Google" />
++      <p className="footer">
++        Não tem conta? <a href="/sign-up">Cadastre-se</a>
++      </p>
++    </>
++  );
++}
+diff --git a/apps/web/src/components/sign-out-button.tsx b/apps/web/src/components/sign-out-button.tsx
+new file mode 100644
+index 0000000..49a75f3
+--- /dev/null
++++ b/apps/web/src/components/sign-out-button.tsx
+@@ -0,0 +1,20 @@
++'use client';
++
++import { useRouter } from 'next/navigation';
++import { authClient } from '@/lib/auth-client';
++
++export function SignOutButton() {
++  const router = useRouter();
++
++  async function handleClick() {
++    await authClient.signOut();
++    router.push('/sign-in');
++    router.refresh();
++  }
++
++  return (
++    <button type="button" onClick={handleClick}>
++      Sair
++    </button>
++  );
++}
+diff --git a/apps/web/src/components/sign-up-form.tsx b/apps/web/src/components/sign-up-form.tsx
+new file mode 100644
+index 0000000..f7b9394
+--- /dev/null
++++ b/apps/web/src/components/sign-up-form.tsx
+@@ -0,0 +1,82 @@
++'use client';
++
++import { type FormEvent, useState } from 'react';
++import { authClient } from '@/lib/auth-client';
++import { authErrorMessage } from '@/lib/auth-errors';
++import { GoogleButton } from './google-button';
++import { ResendVerificationButton } from './resend-verification-button';
++
++export function SignUpForm() {
++  const [error, setError] = useState<string | null>(null);
++  const [sentTo, setSentTo] = useState<string | null>(null);
++  const [loading, setLoading] = useState(false);
++
++  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
++    event.preventDefault();
++    setError(null);
++    setLoading(true);
++
++    const form = new FormData(event.currentTarget);
++    const email = String(form.get('email'));
++
++    const { error } = await authClient.signUp.email({
++      name: String(form.get('name')),
++      email,
++      password: String(form.get('password')),
++      // Para onde o link do e-mail leva o usuário depois de confirmar.
++      callbackURL: `${window.location.origin}/verify-email`,
++    });
++
++    setLoading(false);
++    if (error) return setError(authErrorMessage(error));
++    setSentTo(email);
++  }
++
++  if (sentTo) {
++    return (
++      <>
++        <p className="success">
++          Quase lá! Enviamos um e-mail de confirmação para <strong>{sentTo}</strong>. Clique no link
++          para ativar sua conta.
++        </p>
++        <p className="footer">
++          <ResendVerificationButton email={sentTo} />
++        </p>
++      </>
++    );
++  }
++
++  return (
++    <>
++      <form onSubmit={handleSubmit}>
++        <label>
++          Nome
++          <input name="name" type="text" autoComplete="name" required />
++        </label>
++        <label>
++          E-mail
++          <input name="email" type="email" autoComplete="email" required />
++        </label>
++        <label>
++          Senha (mín. 8 caracteres)
++          <input
++            name="password"
++            type="password"
++            autoComplete="new-password"
++            minLength={8}
++            required
++          />
++        </label>
++        {error ? <p className="error">{error}</p> : null}
++        <button className="primary" type="submit" disabled={loading}>
++          {loading ? 'Criando conta...' : 'Criar conta'}
++        </button>
++      </form>
++      <p className="divider">ou</p>
++      <GoogleButton label="Cadastrar com Google" />
++      <p className="footer">
++        Já tem conta? <a href="/sign-in">Entrar</a>
++      </p>
++    </>
++  );
++}
+diff --git a/apps/web/src/lib/auth-client.ts b/apps/web/src/lib/auth-client.ts
+new file mode 100644
+index 0000000..7743bc7
+--- /dev/null
++++ b/apps/web/src/lib/auth-client.ts
+@@ -0,0 +1,10 @@
++import { createAuthClient } from 'better-auth/react';
++
++/**
++ * Cliente do Better Auth usado nos componentes do navegador.
++ * Aponta para a API (NestJS) e envia os cookies de sessão (`credentials: include`).
++ */
++export const authClient = createAuthClient({
++  baseURL: process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000',
++  fetchOptions: { credentials: 'include' },
++});
+diff --git a/apps/web/src/lib/auth-errors.ts b/apps/web/src/lib/auth-errors.ts
+new file mode 100644
+index 0000000..a29417c
+--- /dev/null
++++ b/apps/web/src/lib/auth-errors.ts
+@@ -0,0 +1,15 @@
++const MESSAGES: Record<string, string> = {
++  INVALID_EMAIL_OR_PASSWORD: 'E-mail ou senha incorretos.',
++  EMAIL_NOT_VERIFIED: 'Confirme seu e-mail antes de entrar. Verifique sua caixa de entrada.',
++  USER_ALREADY_EXISTS: 'Já existe uma conta com este e-mail.',
++  USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL: 'Já existe uma conta com este e-mail.',
++  PASSWORD_TOO_SHORT: 'A senha deve ter pelo menos 8 caracteres.',
++  INVALID_EMAIL: 'E-mail inválido.',
++  INVALID_TOKEN: 'Link inválido ou expirado. Peça um novo.',
++};
++
++/** Traduz o código de erro do Better Auth para uma mensagem em português. */
++export function authErrorMessage(error: { code?: string; message?: string } | null | undefined) {
++  if (!error) return null;
++  return (error.code && MESSAGES[error.code]) || 'Algo deu errado. Tente novamente.';
++}
+diff --git a/apps/web/src/lib/server-session.ts b/apps/web/src/lib/server-session.ts
+new file mode 100644
+index 0000000..39a43c6
+--- /dev/null
++++ b/apps/web/src/lib/server-session.ts
+@@ -0,0 +1,29 @@
++import { cookies } from 'next/headers';
++
++const API_URL = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
++
++export interface Me {
++  user: { id: string; email: string; name: string; image: string | null; emailVerified: boolean };
++  tenant: { id: string; role: 'OWNER' | 'ADMIN' | 'MEMBER' } | null;
++}
++
++/**
++ * Para Server Components: pergunta à API quem está logado, repassando o cookie
++ * do navegador. Retorna null se não houver sessão válida.
++ * (É a validação "de verdade" - o middleware só olha se o cookie existe.)
++ */
++export async function getMe(): Promise<Me | null> {
++  const cookieStore = await cookies();
++  const response = await fetch(`${API_URL}/me`, {
++    headers: { cookie: cookieStore.toString() },
++    cache: 'no-store',
++  });
++  if (response.status === 401) return null;
++  if (!response.ok) throw new Error(`Falha ao consultar /me: ${response.status}`);
++  return (await response.json()) as Me;
++}
++
++/** Só aceita caminhos internos (evita open redirect via ?next=). */
++export function safeNext(next: string | undefined): string {
++  return next && next.startsWith('/') && !next.startsWith('//') ? next : '/dashboard';
++}
+diff --git a/apps/web/src/middleware.ts b/apps/web/src/middleware.ts
+new file mode 100644
+index 0000000..35786fc
+--- /dev/null
++++ b/apps/web/src/middleware.ts
+@@ -0,0 +1,20 @@
++import { NextResponse, type NextRequest } from 'next/server';
++import { getSessionCookie } from 'better-auth/cookies';
++
++/**
++ * Primeira barreira: se não existe cookie de sessão, manda para o login.
++ * Isto é só uma checagem rápida (otimista). A validação real acontece no
++ * Server Component via getMe() e na API (AuthGuard).
++ */
++export function middleware(request: NextRequest) {
++  if (!getSessionCookie(request)) {
++    const url = new URL('/sign-in', request.url);
++    url.searchParams.set('next', request.nextUrl.pathname);
++    return NextResponse.redirect(url);
++  }
++  return NextResponse.next();
++}
++
++export const config = {
++  matcher: ['/dashboard/:path*'],
++};
+diff --git a/apps/web/tsconfig.json b/apps/web/tsconfig.json
+new file mode 100644
+index 0000000..334fafd
+--- /dev/null
++++ b/apps/web/tsconfig.json
+@@ -0,0 +1,21 @@
++{
++  "compilerOptions": {
++    "target": "ES2022",
++    "lib": ["dom", "dom.iterable", "esnext"],
++    "allowJs": true,
++    "skipLibCheck": true,
++    "strict": true,
++    "noEmit": true,
++    "esModuleInterop": true,
++    "module": "esnext",
++    "moduleResolution": "bundler",
++    "resolveJsonModule": true,
++    "isolatedModules": true,
++    "jsx": "preserve",
++    "incremental": true,
++    "plugins": [{ "name": "next" }],
++    "paths": { "@/*": ["./src/*"] }
++  },
++  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
++  "exclude": ["node_modules"]
++}
+diff --git a/docker-compose.yml b/docker-compose.yml
+index e0372c3..caad3b4 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -8,15 +8,25 @@ services:
+       POSTGRES_PASSWORD: postgres
+       POSTGRES_DB: megabot
+     ports:
+-      - "5432:5432"
++      - '5432:5432'
+     volumes:
+       - postgres_data:/var/lib/postgresql/data
+       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+     healthcheck:
+-      test: ["CMD-SHELL", "pg_isready -U postgres -d megabot"]
++      test: ['CMD-SHELL', 'pg_isready -U postgres -d megabot']
+       interval: 5s
+       timeout: 5s
+       retries: 5
+ 
++  # Caixa de e-mail local: captura os e-mails de verificação e de recuperação de senha.
++  # Interface web em http://localhost:8025 (SMTP na porta 1025).
++  mailpit:
++    image: axllent/mailpit:latest
++    container_name: megabot_mailpit
++    restart: always
++    ports:
++      - '1025:1025'
++      - '8025:8025'
++
+ volumes:
+-  postgres_data:
+\ No newline at end of file
++  postgres_data:
+diff --git a/docs/adr/0001-autenticacao.md b/docs/adr/0001-autenticacao.md
+new file mode 100644
+index 0000000..c128bf4
+--- /dev/null
++++ b/docs/adr/0001-autenticacao.md
+@@ -0,0 +1,39 @@
++# ADR 0001 — Provedor de autenticação
++
++- **Status:** Aceita
++- **Data:** 2026-11-10
++- **Contexto da task:** T0.5 (história A1)
++
++## Contexto
++
++Precisamos de cadastro, login, e-mail verificado, login com Google e recuperação de
++senha. O sistema é multitenant, com isolamento por RLS no PostgreSQL (T0.4), API em
++NestJS e front-end em Next.js.
++
++## Opções consideradas
++
++| Opção                         | Prós                                                                                                               | Contras                                                                                                      |
++| ----------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
++| **Better Auth (self-hosted)** | Usuários no nosso Postgres (via Prisma); sem custo por usuário; integra com Nest e Next; hooks para criar o tenant | Nós enviamos os e-mails e cuidamos da operação                                                               |
++| Clerk / Auth0 (gerenciado)    | Pronto rápido, UI e e-mails inclusos                                                                               | Usuários fora do nosso banco (exige sincronização por webhook); custo por usuário ativo; dependência externa |
++| Supabase Auth                 | Maduro                                                                                                             | Só faz sentido se usarmos o Supabase como banco                                                              |
++
++## Decisão
++
++Usar **Better Auth** dentro da API (NestJS), com o adaptador do Prisma.
++
++- A API é a única dona da autenticação (`/api/auth/*`). O web (Next.js) apenas consome.
++- Sessão por **cookie httpOnly** validado no banco a cada requisição.
++- O tenant é criado por um _hook_ no momento em que o usuário é criado
++  (`databaseHooks.user.create.after`), valendo para cadastro com senha e com Google.
++
++## Consequências
++
++- (+) Usuários, sessões e tenants no mesmo banco; fácil de testar de ponta a ponta.
++- (+) Sem custo por usuário.
++- (−) Precisamos operar o envio de e-mail (SMTP) e guardar `BETTER_AUTH_SECRET`.
++- (−) Better Auth é ESM-only; a API é CommonJS e depende do `require(esm)` do Node ≥ 22.12
++  (por isso a imagem Docker da API usa Node 22).
++- (−) `memberships` tem RLS por tenant; para descobrir o tenant de quem acabou de logar
++  foi necessária uma segunda policy de leitura baseada em `app.user_id`
++  (migration `memberships_user_lookup`).
+diff --git a/docs/api/auth.md b/docs/api/auth.md
+new file mode 100644
+index 0000000..c83e1f3
+--- /dev/null
++++ b/docs/api/auth.md
+@@ -0,0 +1,71 @@
++# Contrato da API — Autenticação
++
++Base URL (dev): `http://localhost:3000`. Todas as rotas `/api/auth/*` são atendidas pelo
++[Better Auth](https://www.better-auth.com). Requisições do navegador devem enviar
++`credentials: 'include'` e a `Origin` precisa ser o `WEB_URL` configurado (CORS e CSRF).
++
++## Sessão
++
++Cookie `better-auth.session_token` (httpOnly, `SameSite=Lax`), criado no login e na
++verificação de e-mail. Em rotas protegidas, ausência/expiração do cookie gera **401**.
++
++## Rotas de autenticação (Better Auth)
++
++| Método | Rota                                          | Corpo                                     | Resposta                                                                        |
++| ------ | --------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------- |
++| POST   | `/api/auth/sign-up/email`                     | `{ name, email, password, callbackURL? }` | 200. Envia e-mail de verificação. **Não** cria sessão                           |
++| GET    | `/api/auth/verify-email?token&callbackURL`    | —                                         | 302 para `callbackURL`, cria a sessão                                           |
++| POST   | `/api/auth/send-verification-email`           | `{ email, callbackURL? }`                 | 200. Reenvia a verificação                                                      |
++| POST   | `/api/auth/sign-in/email`                     | `{ email, password }`                     | 200 + cookie. **403** `EMAIL_NOT_VERIFIED`, **401** `INVALID_EMAIL_OR_PASSWORD` |
++| POST   | `/api/auth/sign-in/social`                    | `{ provider: 'google', callbackURL }`     | 200 `{ url }` (redirecionar o navegador para o Google)                          |
++| GET    | `/api/auth/callback/google`                   | (usado pelo Google)                       | 302 para `callbackURL`, cria a sessão                                           |
++| POST   | `/api/auth/request-password-reset`            | `{ email, redirectTo }`                   | 200 sempre (não revela se o e-mail existe)                                      |
++| GET    | `/api/auth/reset-password/:token?callbackURL` | —                                         | 302 para `redirectTo?token=...` (ou `?error=INVALID_TOKEN`)                     |
++| POST   | `/api/auth/reset-password`                    | `{ newPassword, token }`                  | 200                                                                             |
++| POST   | `/api/auth/sign-out`                          | `{}`                                      | 200. Invalida a sessão                                                          |
++| GET    | `/api/auth/get-session`                       | —                                         | 200 `{ session, user }` ou `null`                                               |
++
++Regras: senha com no mínimo 8 caracteres (`PASSWORD_TOO_SHORT`, 400); e-mail obrigatoriamente
++verificado antes do primeiro login com senha. Contas Google já entram verificadas.
++
++## Rotas da aplicação
++
++Todas exigem sessão (guard global), exceto as marcadas com `@Public()`.
++
++### `GET /health` (público)
++
++`200 { "status": "ok" }`
++
++### `GET /me`
++
++`200`
++
++```json
++{
++  "user": {
++    "id": "uuid",
++    "email": "ana@exemplo.com",
++    "name": "Ana",
++    "image": null,
++    "emailVerified": true
++  },
++  "tenant": { "id": "uuid", "role": "OWNER" }
++}
++```
++
++`401` sem sessão válida. `tenant` é o primeiro (mais antigo) tenant do usuário.
++
++## Provisionamento de tenant
++
++No primeiro cadastro (senha ou Google) é criado `Tenant` ("Empresa de <nome>") e uma
++`Membership` com papel `OWNER`. A operação é idempotente e segura sob concorrência
++(`provisionTenantForUser`, em `packages/database`).
++
++## Migrações (todas com rollback manual)
++
++| Migration                                                                                                       | Rollback                      |
++| --------------------------------------------------------------------------------------------------------------- | ----------------------------- |
++| `20261110200000_auth_tables` (colunas em `users`, tabelas `sessions`, `accounts`, `verifications`)              | `rollback.sql` na mesma pasta |
++| `20261110200100_memberships_user_lookup` (policy `membership_self_select_policy`, função `current_app_user_id`) | `rollback.sql` na mesma pasta |
++
++Aplique os rollbacks na **ordem inversa** das migrations.
+diff --git a/package.json b/package.json
+index 9de0917..108253c 100644
+--- a/package.json
++++ b/package.json
+@@ -7,7 +7,7 @@
+   "scripts": {
+     "dev": "turbo dev",
+     "build": "turbo build",
+-    "test": "turbo test",
++    "test": "turbo test --concurrency=1",
+     "lint": "turbo lint",
+     "typecheck": "turbo check-types",
+     "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\"",
+diff --git a/packages/database/README.md b/packages/database/README.md
+index 56534db..534c6e8 100644
+--- a/packages/database/README.md
++++ b/packages/database/README.md
+@@ -104,3 +104,29 @@ A tabela `_prisma_migrations` não muda nesse ciclo. Para validar do zero, use `
+ 4. Dê ao `megabot_app` apenas os `GRANT`s necessários.
+ 5. Acrescente cenários ao teste de isolamento: leitura cruzada, consulta sem contexto e escrita cruzada.
+ 6. Acesse a tabela somente via `withTenant`.
++
++---
++
++## Descobrindo o tenant de um usuário (login) e criando o tenant (cadastro)
++
++A policy `tenant_isolation_policy` só mostra memberships do tenant em `app.tenant_id`. No login ainda não
++sabemos o tenant, então existe uma **segunda policy, só de SELECT**: `membership_self_select_policy`, que
++libera as memberships do **próprio usuário** informado em `app.user_id` (função `current_app_user_id()`).
++As policies permissivas são combinadas com OR; INSERT/UPDATE/DELETE continuam presos ao tenant.
++
++> Por que não uma função `SECURITY DEFINER`? Como `memberships` usa `FORCE ROW LEVEL SECURITY` e o dono da
++> tabela é o mesmo usuário da aplicação (`megabot_app`), a função também seria barrada pelo RLS.
++
++| Helper                                             | Para que serve                                                                          |
++| -------------------------------------------------- | --------------------------------------------------------------------------------------- |
++| `withTenant(tenantId, fn)`                         | Trabalhar DENTRO de um tenant (uso normal)                                              |
++| `withUser(userId, fn)` / `listUserTenants(userId)` | Descobrir a quais tenants o usuário pertence                                            |
++| `provisionTenantForUser(user)`                     | Criar tenant + membership `OWNER` no primeiro cadastro (idempotente, com advisory lock) |
++
++Ao criar o tenant, `provisionTenantForUser` define `app.tenant_id` com o UUID do tenant **novo** antes de
++inserir a membership; sem isso o `WITH CHECK` da policy bloqueia o INSERT.
++
++## Build do pacote
++
++`pnpm --filter @megabot/database build` gera o Prisma Client e compila `src/` para `dist/` (CommonJS), que é o
++que a API usa em runtime. Os testes e o typecheck continuam usando `src/` diretamente.
+diff --git a/packages/database/package.json b/packages/database/package.json
+index 3469c26..19821af 100644
+--- a/packages/database/package.json
++++ b/packages/database/package.json
+@@ -2,16 +2,17 @@
+   "name": "@megabot/database",
+   "version": "0.1.0",
+   "private": true,
+-  "main": "./src/index.ts",
++  "main": "./dist/index.js",
+   "types": "./src/index.ts",
+   "scripts": {
++    "build": "prisma generate && swc src -d dist --strip-leading-paths --config-file ../config/swc/.swcrc -C module.type=commonjs",
+     "db:generate": "prisma generate",
+     "db:migrate:dev": "prisma migrate dev",
+     "db:migrate:deploy": "prisma migrate deploy",
+     "db:studio": "prisma studio",
+     "lint": "eslint .",
+     "check-types": "tsc --noEmit",
+-    "test": "node --env-file=../../.env --import tsx --test tests/**/*.test.ts"
++    "test": "node --env-file=../../.env --import tsx --test --test-concurrency=1 tests/**/*.test.ts"
+   },
+   "dependencies": {
+     "@prisma/adapter-pg": "^7.10.1",
+diff --git a/packages/database/prisma/migrations/20261110200000_auth_tables/migration.sql b/packages/database/prisma/migrations/20261110200000_auth_tables/migration.sql
+new file mode 100644
+index 0000000..5442de8
+--- /dev/null
++++ b/packages/database/prisma/migrations/20261110200000_auth_tables/migration.sql
+@@ -0,0 +1,66 @@
++-- AlterTable
++ALTER TABLE "users" ADD COLUMN "email_verified" BOOLEAN NOT NULL DEFAULT false,
++ADD COLUMN "image" TEXT;
++
++-- CreateTable
++CREATE TABLE "sessions" (
++    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
++    "token" TEXT NOT NULL,
++    "expires_at" TIMESTAMPTZ(6) NOT NULL,
++    "ip_address" TEXT,
++    "user_agent" TEXT,
++    "user_id" UUID NOT NULL,
++    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
++    "updated_at" TIMESTAMPTZ(6) NOT NULL,
++
++    CONSTRAINT "sessions_pkey" PRIMARY KEY ("id")
++);
++
++-- CreateTable
++CREATE TABLE "accounts" (
++    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
++    "account_id" TEXT NOT NULL,
++    "provider_id" TEXT NOT NULL,
++    "user_id" UUID NOT NULL,
++    "access_token" TEXT,
++    "refresh_token" TEXT,
++    "id_token" TEXT,
++    "access_token_expires_at" TIMESTAMPTZ(6),
++    "refresh_token_expires_at" TIMESTAMPTZ(6),
++    "scope" TEXT,
++    "password" TEXT,
++    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
++    "updated_at" TIMESTAMPTZ(6) NOT NULL,
++
++    CONSTRAINT "accounts_pkey" PRIMARY KEY ("id")
++);
++
++-- CreateTable
++CREATE TABLE "verifications" (
++    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
++    "identifier" TEXT NOT NULL,
++    "value" TEXT NOT NULL,
++    "expires_at" TIMESTAMPTZ(6) NOT NULL,
++    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
++    "updated_at" TIMESTAMPTZ(6) NOT NULL,
++
++    CONSTRAINT "verifications_pkey" PRIMARY KEY ("id")
++);
++
++-- CreateIndex
++CREATE UNIQUE INDEX "sessions_token_key" ON "sessions"("token");
++
++-- CreateIndex
++CREATE INDEX "sessions_user_id_idx" ON "sessions"("user_id");
++
++-- CreateIndex
++CREATE INDEX "accounts_user_id_idx" ON "accounts"("user_id");
++
++-- CreateIndex
++CREATE INDEX "verifications_identifier_idx" ON "verifications"("identifier");
++
++-- AddForeignKey
++ALTER TABLE "sessions" ADD CONSTRAINT "sessions_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
++
++-- AddForeignKey
++ALTER TABLE "accounts" ADD CONSTRAINT "accounts_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+diff --git a/packages/database/prisma/migrations/20261110200000_auth_tables/rollback.sql b/packages/database/prisma/migrations/20261110200000_auth_tables/rollback.sql
+new file mode 100644
+index 0000000..0d823cd
+--- /dev/null
++++ b/packages/database/prisma/migrations/20261110200000_auth_tables/rollback.sql
+@@ -0,0 +1,6 @@
++-- Reversão manual (Rollback script)
++DROP TABLE IF EXISTS "verifications";
++DROP TABLE IF EXISTS "accounts";
++DROP TABLE IF EXISTS "sessions";
++ALTER TABLE "users" DROP COLUMN IF EXISTS "image";
++ALTER TABLE "users" DROP COLUMN IF EXISTS "email_verified";
+diff --git a/packages/database/prisma/migrations/20261110200100_memberships_user_lookup/migration.sql b/packages/database/prisma/migrations/20261110200100_memberships_user_lookup/migration.sql
+new file mode 100644
+index 0000000..7e8f7e3
+--- /dev/null
++++ b/packages/database/prisma/migrations/20261110200100_memberships_user_lookup/migration.sql
+@@ -0,0 +1,24 @@
++-- Por que esta migration existe?
++-- A policy `tenant_isolation_policy` só deixa ver memberships do tenant que está
++-- em `app.tenant_id`. Mas, no login, ainda NÃO sabemos o tenant: precisamos
++-- descobri-lo a partir do usuário. Esta segunda policy (somente SELECT) libera
++-- a leitura das memberships do PRÓPRIO usuário informado em `app.user_id`.
++-- Policies permissivas são combinadas com OR, então o isolamento por tenant
++-- continua valendo para tudo o mais (INSERT, UPDATE, DELETE e leituras por tenant).
++
++-- 1. Função que lê o usuário da sessão (mesmo padrão de current_tenant_id)
++CREATE OR REPLACE FUNCTION current_app_user_id() RETURNS UUID AS $$
++BEGIN
++  RETURN NULLIF(current_setting('app.user_id', true), '')::UUID;
++EXCEPTION
++  WHEN OTHERS THEN
++    RETURN NULL;
++END;
++$$ LANGUAGE plpgsql STABLE SECURITY INVOKER;
++
++-- 2. Policy de leitura das próprias memberships
++DROP POLICY IF EXISTS membership_self_select_policy ON "memberships";
++
++CREATE POLICY membership_self_select_policy ON "memberships"
++  FOR SELECT
++  USING (user_id = current_app_user_id());
+diff --git a/packages/database/prisma/migrations/20261110200100_memberships_user_lookup/rollback.sql b/packages/database/prisma/migrations/20261110200100_memberships_user_lookup/rollback.sql
+new file mode 100644
+index 0000000..bad3b73
+--- /dev/null
++++ b/packages/database/prisma/migrations/20261110200100_memberships_user_lookup/rollback.sql
+@@ -0,0 +1,3 @@
++-- Reversão manual (Rollback script)
++DROP POLICY IF EXISTS membership_self_select_policy ON "memberships";
++DROP FUNCTION IF EXISTS current_app_user_id();
+diff --git a/packages/database/prisma/schema.prisma b/packages/database/prisma/schema.prisma
+index 39bdb5a..caa1680 100644
+--- a/packages/database/prisma/schema.prisma
++++ b/packages/database/prisma/schema.prisma
+@@ -24,16 +24,74 @@ model Tenant {
+ }
+ 
+ model User {
+-  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+-  email       String       @unique @db.VarChar(255)
+-  name        String       @db.VarChar(255)
+-  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+-  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+-  memberships Membership[]
++  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
++  email         String       @unique @db.VarChar(255)
++  name          String       @db.VarChar(255)
++  emailVerified Boolean      @default(false) @map("email_verified")
++  image         String?
++  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
++  updatedAt     DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
++  memberships   Membership[]
++  sessions      Session[]
++  accounts      Account[]
+ 
+   @@map("users")
+ }
+ 
++// ---------------------------------------------------------------------------
++// Tabelas de autenticação (Better Auth). São globais: não têm tenant_id e,
++// por isso, não têm RLS. O vínculo usuário -> empresa fica em `memberships`.
++// ---------------------------------------------------------------------------
++
++model Session {
++  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
++  token     String   @unique
++  expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
++  ipAddress String?  @map("ip_address")
++  userAgent String?  @map("user_agent")
++  userId    String   @map("user_id") @db.Uuid
++  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
++  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
++
++  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
++
++  @@index([userId])
++  @@map("sessions")
++}
++
++model Account {
++  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
++  accountId             String    @map("account_id")
++  providerId            String    @map("provider_id")
++  userId                String    @map("user_id") @db.Uuid
++  accessToken           String?   @map("access_token")
++  refreshToken          String?   @map("refresh_token")
++  idToken               String?   @map("id_token")
++  accessTokenExpiresAt  DateTime? @map("access_token_expires_at") @db.Timestamptz(6)
++  refreshTokenExpiresAt DateTime? @map("refresh_token_expires_at") @db.Timestamptz(6)
++  scope                 String?
++  password              String?
++  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
++  updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
++
++  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
++
++  @@index([userId])
++  @@map("accounts")
++}
++
++model Verification {
++  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
++  identifier String
++  value      String
++  expiresAt  DateTime @map("expires_at") @db.Timestamptz(6)
++  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
++  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
++
++  @@index([identifier])
++  @@map("verifications")
++}
++
+ model Membership {
+   id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+   tenantId  String   @map("tenant_id") @db.Uuid
+diff --git a/packages/database/src/index.ts b/packages/database/src/index.ts
+index e01ecbb..e9e5459 100644
+--- a/packages/database/src/index.ts
++++ b/packages/database/src/index.ts
+@@ -1,3 +1,5 @@
+ export * from './generated/prisma/client';
+ export { prisma } from './client';
+ export { withTenant, type TenantTransactionClient } from './tenant-helper';
++export { withUser, listUserTenants, type UserTenant } from './user-helper';
++export { provisionTenantForUser, slugify, type ProvisionResult } from './provision-tenant';
+diff --git a/packages/database/src/provision-tenant.ts b/packages/database/src/provision-tenant.ts
+new file mode 100644
+index 0000000..4ba3d95
+--- /dev/null
++++ b/packages/database/src/provision-tenant.ts
+@@ -0,0 +1,67 @@
++import { randomBytes, randomUUID } from 'node:crypto';
++import { prisma } from './client';
++import { assertUuid } from './uuid';
++
++export interface ProvisionResult {
++  tenantId: string;
++  /** false quando o usuário já tinha tenant (chamada repetida = no-op) */
++  created: boolean;
++}
++
++/** "João da Silva" -> "joao-da-silva" */
++export function slugify(input: string): string {
++  const base = input
++    .normalize('NFD')
++    .replace(/[̀-ͯ]/g, '')
++    .toLowerCase()
++    .replace(/[^a-z0-9]+/g, '-')
++    .replace(/^-+|-+$/g, '')
++    .slice(0, 40);
++  return base || 'empresa';
++}
++
++/**
++ * Cria o tenant do usuário no primeiro cadastro (usuário vira OWNER).
++ *
++ * Pontos importantes:
++ * 1. Tudo acontece numa única transação.
++ * 2. `app.tenant_id` é definido com o UUID do tenant NOVO antes de inserir a
++ *    membership. Sem isso, o WITH CHECK da policy de RLS bloqueia o INSERT.
++ * 3. `app.user_id` permite checar se o usuário já tem membership (idempotência).
++ * 4. O advisory lock evita dois tenants se o hook rodar duas vezes em paralelo.
++ */
++export async function provisionTenantForUser(user: {
++  id: string;
++  name: string;
++  email: string;
++}): Promise<ProvisionResult> {
++  assertUuid(user.id, 'userId');
++
++  const tenantId = randomUUID();
++  const displayName = user.name?.trim() || user.email.split('@')[0];
++  const slug = `${slugify(displayName)}-${randomBytes(3).toString('hex')}`;
++
++  return prisma.$transaction(async (tx) => {
++    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${user.id}))`;
++    await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
++    await tx.$executeRaw`SELECT set_config('app.user_id', ${user.id}, true)`;
++
++    const existing = await tx.membership.findFirst({
++      where: { userId: user.id },
++      select: { tenantId: true },
++      orderBy: { createdAt: 'asc' },
++    });
++    if (existing) {
++      return { tenantId: existing.tenantId, created: false };
++    }
++
++    await tx.tenant.create({
++      data: { id: tenantId, name: `Empresa de ${displayName}`, slug },
++    });
++    await tx.membership.create({
++      data: { tenantId, userId: user.id, role: 'OWNER' },
++    });
++
++    return { tenantId, created: true };
++  });
++}
+diff --git a/packages/database/src/user-helper.ts b/packages/database/src/user-helper.ts
+new file mode 100644
+index 0000000..66e53b9
+--- /dev/null
++++ b/packages/database/src/user-helper.ts
+@@ -0,0 +1,48 @@
++import { Prisma } from './generated/prisma/client';
++import { prisma } from './client';
++import { assertUuid } from './uuid';
++
++/**
++ * Executa queries numa transação com `app.user_id` definido.
++ *
++ * Serve para UMA coisa: descobrir a quais tenants um usuário pertence quando
++ * ainda não sabemos o tenant (ex.: logo após o login). A policy
++ * `membership_self_select_policy` libera apenas o SELECT das memberships do
++ * próprio usuário. Para trabalhar DENTRO de um tenant, use `withTenant`.
++ */
++export async function withUser<T>(
++  userId: string,
++  fn: (tx: Prisma.TransactionClient) => Promise<T>,
++  options?: {
++    maxWait?: number;
++    timeout?: number;
++    isolationLevel?: Prisma.TransactionIsolationLevel;
++  },
++): Promise<T> {
++  assertUuid(userId, 'userId');
++
++  return prisma.$transaction(async (tx) => {
++    await tx.$executeRaw`SELECT set_config('app.user_id', ${userId}, true);`;
++    return await fn(tx);
++  }, options);
++}
++
++export interface UserTenant {
++  tenantId: string;
++  role: 'OWNER' | 'ADMIN' | 'MEMBER';
++}
++
++/**
++ * Lista os tenants do usuário (do mais antigo para o mais novo).
++ * Na Sprint 0 cada usuário tem apenas um; o primeiro é o tenant "ativo".
++ */
++export async function listUserTenants(userId: string): Promise<UserTenant[]> {
++  const memberships = await withUser(userId, (tx) =>
++    tx.membership.findMany({
++      where: { userId },
++      select: { tenantId: true, role: true },
++      orderBy: { createdAt: 'asc' },
++    }),
++  );
++  return memberships;
++}
+diff --git a/packages/database/src/uuid.ts b/packages/database/src/uuid.ts
+new file mode 100644
+index 0000000..67d3632
+--- /dev/null
++++ b/packages/database/src/uuid.ts
+@@ -0,0 +1,11 @@
++const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
++
++/**
++ * Garante que o valor é um UUID válido antes de ele ser usado em set_config().
++ * (O valor vai como parâmetro, não concatenado, mas validar cedo gera erros melhores.)
++ */
++export function assertUuid(value: string, label = 'id'): void {
++  if (!UUID_REGEX.test(value)) {
++    throw new Error(`Invalid ${label} format: ${value}`);
++  }
++}
+diff --git a/packages/database/tests/integration/provision-tenant.test.ts b/packages/database/tests/integration/provision-tenant.test.ts
+new file mode 100644
+index 0000000..30dccf5
+--- /dev/null
++++ b/packages/database/tests/integration/provision-tenant.test.ts
+@@ -0,0 +1,83 @@
++import { describe, it, before, after } from 'node:test';
++import assert from 'node:assert/strict';
++import { randomUUID } from 'node:crypto';
++import { prisma } from '../../src/client';
++import { withTenant } from '../../src/tenant-helper';
++import { listUserTenants } from '../../src/user-helper';
++import { provisionTenantForUser, slugify } from '../../src/provision-tenant';
++
++const RUN = randomUUID().slice(0, 8);
++const email = (n: string) => `${n}-${RUN}@provision.test`;
++
++describe('provisionTenantForUser', () => {
++  const userIds: string[] = [];
++
++  async function newUser(name: string) {
++    const user = await prisma.user.create({ data: { name, email: email(name.toLowerCase()) } });
++    userIds.push(user.id);
++    return user;
++  }
++
++  after(async () => {
++    // Remove só o que este teste criou (sem TRUNCATE, para não afetar outros testes).
++    const tenantIds: string[] = [];
++    for (const id of userIds) {
++      tenantIds.push(...(await listUserTenants(id)).map((t) => t.tenantId));
++    }
++    await prisma.tenant.deleteMany({ where: { id: { in: tenantIds } } }); // cascade remove memberships
++    await prisma.user.deleteMany({ where: { id: { in: userIds } } });
++    await prisma.$disconnect();
++  });
++
++  before(() => {
++    assert.equal(slugify('João da Silva!'), 'joao-da-silva');
++  });
++
++  it('cria um tenant e uma membership OWNER no primeiro cadastro', async () => {
++    const user = await newUser('Ana');
++    const result = await provisionTenantForUser(user);
++
++    assert.equal(result.created, true);
++    const tenants = await listUserTenants(user.id);
++    assert.equal(tenants.length, 1);
++    assert.equal(tenants[0].tenantId, result.tenantId);
++    assert.equal(tenants[0].role, 'OWNER');
++  });
++
++  it('é idempotente: chamar de novo não cria outro tenant', async () => {
++    const user = await newUser('Bruno');
++    const first = await provisionTenantForUser(user);
++    const second = await provisionTenantForUser(user);
++
++    assert.equal(second.created, false);
++    assert.equal(second.tenantId, first.tenantId);
++    assert.equal((await listUserTenants(user.id)).length, 1);
++  });
++
++  it('é seguro sob concorrência (5 chamadas paralelas = 1 tenant)', async () => {
++    const user = await newUser('Carla');
++    const results = await Promise.all(
++      Array.from({ length: 5 }, () => provisionTenantForUser(user)),
++    );
++
++    assert.equal(results.filter((r) => r.created).length, 1);
++    assert.equal(new Set(results.map((r) => r.tenantId)).size, 1);
++    assert.equal((await listUserTenants(user.id)).length, 1);
++  });
++
++  it('mantém o isolamento: outro tenant não enxerga a membership', async () => {
++    const owner = await newUser('Diego');
++    const other = await newUser('Elisa');
++    const ownerTenant = await provisionTenantForUser(owner);
++    const otherTenant = await provisionTenantForUser(other);
++
++    const seenByOther = await withTenant(otherTenant.tenantId, (tx) => tx.membership.findMany());
++    assert.ok(seenByOther.every((m) => m.tenantId === otherTenant.tenantId));
++    assert.ok(!seenByOther.some((m) => m.tenantId === ownerTenant.tenantId));
++  });
++
++  it('sem app.user_id nem app.tenant_id, nenhuma membership é visível', async () => {
++    const rows = await prisma.membership.findMany();
++    assert.equal(rows.length, 0);
++  });
++});
+diff --git a/turbo.json b/turbo.json
+index 2a9a8a3..eb71418 100644
+--- a/turbo.json
++++ b/turbo.json
+@@ -3,9 +3,11 @@
+   "tasks": {
+     "build": {
+       "dependsOn": ["^build"],
++      "env": ["NEXT_PUBLIC_API_URL"],
+       "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+     },
+     "dev": {
++      "dependsOn": ["^build"],
+       "persistent": true,
+       "cache": false
+     },

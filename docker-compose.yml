@@ -8,15 +8,25 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: megabot
     ports:
-      - "5432:5432"
+      - '5432:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d megabot"]
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d megabot']
       interval: 5s
       timeout: 5s
       retries: 5
+
+  # Caixa de e-mail local: captura os e-mails de verificação e de recuperação de senha.
+  # Interface web em http://localhost:8025 (SMTP na porta 1025).
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: megabot_mailpit
+    restart: always
+    ports:
+      - '1025:1025'
+      - '8025:8025'
 
 volumes:
   postgres_data:

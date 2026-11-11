@@ -3,7 +3,29 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build": "echo 'Build da API'",
-    "start": "node index.js"
+    "dev": "tsx watch --env-file=../../.env src/main.ts",
+    "build": "swc src -d dist --strip-leading-paths --config-file ../../packages/config/swc/.swcrc -C module.type=commonjs",
+    "start": "node dist/main.js",
+    "lint": "eslint .",
+    "check-types": "tsc --noEmit",
+    "test": "node --env-file=../../.env --import tsx --test --test-concurrency=1 tests/**/*.test.ts"
+  },
+  "dependencies": {
+    "@megabot/database": "workspace:*",
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@nestjs/platform-express": "^11.0.0",
+    "better-auth": "^1.3.0",
+    "nodemailer": "^7.0.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1"
+  },
+  "devDependencies": {
+    "@megabot/tsconfig": "workspace:*",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "@types/nodemailer": "^6.4.17",
+    "tsx": "^4.19.0",
+    "typescript": "^5.0.0"
   }
 }

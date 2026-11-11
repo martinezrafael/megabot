@@ -104,3 +104,29 @@ A tabela `_prisma_migrations` não muda nesse ciclo. Para validar do zero, use `
 4. Dê ao `megabot_app` apenas os `GRANT`s necessários.
 5. Acrescente cenários ao teste de isolamento: leitura cruzada, consulta sem contexto e escrita cruzada.
 6. Acesse a tabela somente via `withTenant`.
+
+---
+
+## Descobrindo o tenant de um usuário (login) e criando o tenant (cadastro)
+
+A policy `tenant_isolation_policy` só mostra memberships do tenant em `app.tenant_id`. No login ainda não
+sabemos o tenant, então existe uma **segunda policy, só de SELECT**: `membership_self_select_policy`, que
+libera as memberships do **próprio usuário** informado em `app.user_id` (função `current_app_user_id()`).
+As policies permissivas são combinadas com OR; INSERT/UPDATE/DELETE continuam presos ao tenant.
+
+> Por que não uma função `SECURITY DEFINER`? Como `memberships` usa `FORCE ROW LEVEL SECURITY` e o dono da
+> tabela é o mesmo usuário da aplicação (`megabot_app`), a função também seria barrada pelo RLS.
+
+| Helper                                             | Para que serve                                                                          |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `withTenant(tenantId, fn)`                         | Trabalhar DENTRO de um tenant (uso normal)                                              |
+| `withUser(userId, fn)` / `listUserTenants(userId)` | Descobrir a quais tenants o usuário pertence                                            |
+| `provisionTenantForUser(user)`                     | Criar tenant + membership `OWNER` no primeiro cadastro (idempotente, com advisory lock) |
+
+Ao criar o tenant, `provisionTenantForUser` define `app.tenant_id` com o UUID do tenant **novo** antes de
+inserir a membership; sem isso o `WITH CHECK` da policy bloqueia o INSERT.
+
+## Build do pacote
+
+`pnpm --filter @megabot/database build` gera o Prisma Client e compila `src/` para `dist/` (CommonJS), que é o
+que a API usa em runtime. Os testes e o typecheck continuam usando `src/` diretamente.
