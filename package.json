@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
-    "test": "turbo test",
+    "test": "turbo test --concurrency=1",
     "lint": "turbo lint",
     "typecheck": "turbo check-types",
     "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\"",

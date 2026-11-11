@@ -2,3 +2,6 @@
 .env
 node_modules
 packages/database/src/generated
+dist
+.next
+*.tsbuildinfo

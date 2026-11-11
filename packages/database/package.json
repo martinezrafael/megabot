@@ -2,16 +2,17 @@
   "name": "@megabot/database",
   "version": "0.1.0",
   "private": true,
-  "main": "./src/index.ts",
+  "main": "./dist/index.js",
   "types": "./src/index.ts",
   "scripts": {
+    "build": "prisma generate && swc src -d dist --strip-leading-paths --config-file ../config/swc/.swcrc -C module.type=commonjs",
     "db:generate": "prisma generate",
     "db:migrate:dev": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "lint": "eslint .",
     "check-types": "tsc --noEmit",
-    "test": "node --env-file=../../.env --import tsx --test tests/**/*.test.ts"
+    "test": "node --env-file=../../.env --import tsx --test --test-concurrency=1 tests/**/*.test.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.1",

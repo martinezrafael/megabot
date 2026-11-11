@@ -81,6 +81,23 @@ jobs:
       - name: Run Tests
         run: pnpm test
 
+      # Os rollbacks devem ser aplicados na ORDEM INVERSA das migrations.
+      - name: Verify auth migrations rollback
+        run: |
+          psql "$APP_PG_URL" -v ON_ERROR_STOP=1 \
+            -f packages/database/prisma/migrations/20261110200100_memberships_user_lookup/rollback.sql
+          SELF=$(psql "$APP_PG_URL" -tAc "SELECT count(*) FROM pg_policies WHERE policyname = 'membership_self_select_policy'")
+          FUNC=$(psql "$APP_PG_URL" -tAc "SELECT count(*) FROM pg_proc WHERE proname = 'current_app_user_id'")
+          test "$SELF" = "0"
+          test "$FUNC" = "0"
+
+          psql "$APP_PG_URL" -v ON_ERROR_STOP=1 \
+            -f packages/database/prisma/migrations/20261110200000_auth_tables/rollback.sql
+          TABLES=$(psql "$APP_PG_URL" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_name IN ('sessions','accounts','verifications')")
+          COLS=$(psql "$APP_PG_URL" -tAc "SELECT count(*) FROM information_schema.columns WHERE table_name = 'users' AND column_name IN ('email_verified','image')")
+          test "$TABLES" = "0"
+          test "$COLS" = "0"
+
       - name: Verify RLS rollback
         run: |
           psql "$APP_PG_URL" -v ON_ERROR_STOP=1 \

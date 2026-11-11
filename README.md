@@ -64,6 +64,36 @@ Os testes de integração usam o banco local. Antes de `pnpm test`, o container 
 
 ---
 
+## 🔐 Autenticação (Better Auth)
+
+A API (NestJS, porta `3000`) cuida da autenticação; o web (Next.js, porta `3001`) consome. Decisão em [docs/adr/0001-autenticacao.md](docs/adr/0001-autenticacao.md) e contrato em [docs/api/auth.md](docs/api/auth.md).
+
+### Subir tudo em dev
+
+```bash
+pnpm db:up          # Postgres + Mailpit (caixa de e-mail local)
+pnpm db:generate
+pnpm db:migrate
+pnpm dev            # API em :3000 e web em :3001
+```
+
+- Caixa de e-mail de desenvolvimento (verificação e recuperação de senha): http://localhost:8025
+- Defina `BETTER_AUTH_SECRET` no `.env` (mínimo 32 caracteres). Gere um com `openssl rand -base64 32`.
+
+### Login com Google (opcional)
+
+1. No [Google Cloud Console](https://console.cloud.google.com/apis/credentials), crie um **OAuth client ID** do tipo _Web application_.
+2. Em _Authorized redirect URIs_, adicione `http://localhost:3000/api/auth/callback/google`.
+3. Copie o Client ID e o Client Secret para `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET` no `.env` e reinicie a API.
+
+Sem essas variáveis o botão "Entrar com Google" mostra "indisponível" e o resto funciona normalmente.
+
+### Testes
+
+`pnpm test` roda em série (`--concurrency=1`) porque os pacotes compartilham o mesmo banco. O fluxo de autenticação é testado de ponta a ponta em `apps/api/tests/auth.test.ts`.
+
+---
+
 ## 🔗 Configuração de Webhooks Locais (Túnel HTTP)
 
 1. **Inicie o túnel apontando para a porta da API (`3000`):**
