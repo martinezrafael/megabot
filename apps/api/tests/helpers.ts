@@ -4,6 +4,7 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { listUserTenants, prisma } from '@megabot/database';
 import { createApp } from '../src/bootstrap';
 import type { AppConfig } from '../src/config';
+import type { DestinationStream } from 'pino';
 import { createMemoryMailer, type Mailer } from '../src/mailer';
 
 export const WEB_URL = 'http://localhost:3001';
@@ -29,9 +30,12 @@ export interface TestApp {
     init?: {
       method?: string;
       body?: unknown;
+      /** Corpo já serializado (para testar JSON inválido ou grande demais). */
+      rawBody?: string;
       cookie?: string;
       origin?: string;
       redirect?: RequestRedirect;
+      headers?: Record<string, string>;
     },
   ) => Promise<Response>;
   /** Cria um e-mail único para o teste e registra para limpeza. */
@@ -39,19 +43,42 @@ export interface TestApp {
   close: () => Promise<void>;
 }
 
-export async function startTestApp(options: { mailer?: Mailer } = {}): Promise<TestApp> {
-  const port = await freePort();
-  const baseUrl = `http://localhost:${port}`;
-  const config: AppConfig = {
+/** Configuração de teste: limites de rate limit altos e logs desligados. */
+export function createTestConfig(port: number, overrides: Partial<AppConfig> = {}): AppConfig {
+  return {
+    env: 'test',
     port,
-    authUrl: baseUrl,
+    authUrl: `http://localhost:${port}`,
     webUrl: WEB_URL,
     authSecret: 'test-secret-test-secret-test-secret-123456',
     google: { clientId: 'test-google-client-id', clientSecret: 'test-google-client-secret' },
     smtp: { host: 'localhost', port: 1025, from: 'test@megabot.local' },
+    logLevel: 'silent',
+    rateLimit: { windowMs: 60_000, max: 10_000, authMax: 10_000 },
+    trustProxy: false,
+    swaggerEnabled: false,
+    ...overrides,
   };
+}
+
+export interface StartTestAppOptions {
+  mailer?: Mailer;
+  config?: Partial<AppConfig>;
+  logStream?: DestinationStream;
+  dbPing?: () => Promise<unknown>;
+}
+
+export async function startTestApp(options: StartTestAppOptions = {}): Promise<TestApp> {
+  const port = await freePort();
+  const baseUrl = `http://localhost:${port}`;
+  const config = createTestConfig(port, options.config);
   const mailer = createMemoryMailer();
-  const app = await createApp({ config, mailer: options.mailer ?? mailer });
+  const app = await createApp({
+    config,
+    mailer: options.mailer ?? mailer,
+    logStream: options.logStream,
+    dbPing: options.dbPing,
+  });
   await app.listen(port);
 
   const run = randomUUID().slice(0, 8);
@@ -68,14 +95,15 @@ export async function startTestApp(options: { mailer?: Mailer } = {}): Promise<T
     },
     api: (path, init = {}) =>
       fetch(`${baseUrl}${path}`, {
-        method: init.method ?? (init.body ? 'POST' : 'GET'),
+        method: init.method ?? (init.body || init.rawBody ? 'POST' : 'GET'),
         redirect: init.redirect ?? 'manual',
         headers: {
           Origin: init.origin ?? WEB_URL,
-          ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+          ...(init.body || init.rawBody ? { 'Content-Type': 'application/json' } : {}),
           ...(init.cookie ? { Cookie: init.cookie } : {}),
+          ...init.headers,
         },
-        body: init.body ? JSON.stringify(init.body) : undefined,
+        body: init.rawBody ?? (init.body ? JSON.stringify(init.body) : undefined),
       }),
     close: async () => {
       // Remove só o que este teste criou (sem TRUNCATE).

@@ -6,6 +6,12 @@ import type { NextConfig } from 'next';
 const rootEnv = path.resolve(process.cwd(), '../../.env');
 if (existsSync(rootEnv)) process.loadEnvFile(rootEnv);
 
+// Falha rápida: valida as variáveis antes de qualquer coisa subir.
+// (import dinâmico/require: o next.config roda antes do bundler do Next)
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { parseWebEnv } = require('./src/env') as typeof import('./src/env');
+parseWebEnv(process.env);
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
 };

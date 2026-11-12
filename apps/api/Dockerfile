@@ -38,4 +38,8 @@ EXPOSE 3000
 
 ENV NODE_ENV=production
 
+# Liveness: o orquestrador marca o container como "unhealthy" se /health parar de responder.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD wget -qO- http://localhost:${PORT:-3000}/health || exit 1
+
 CMD ["pnpm", "--filter", "@megabot/api", "start"]
