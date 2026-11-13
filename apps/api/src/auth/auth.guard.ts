@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { fromNodeHeaders } from 'better-auth/node';
+import { PinoLogger } from 'nestjs-pino';
 import { listUserTenants } from '@megabot/database';
 import type { Auth } from './auth';
 import { AUTH } from './auth.tokens';
@@ -22,6 +23,7 @@ export class AuthGuard implements CanActivate {
   constructor(
     @Inject(Reflector) private readonly reflector: Reflector,
     @Inject(AUTH) private readonly auth: Auth,
+    @Inject(PinoLogger) private readonly logger: PinoLogger,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -54,6 +56,14 @@ export class AuthGuard implements CanActivate {
       tenantId: active?.tenantId ?? null,
       role: active?.role ?? null,
     };
+
+    // A partir daqui, todo log desta requisição (inclusive o "request completed")
+    // carrega o tenant e o usuário.
+    try {
+      this.logger.assign({ tenant_id: request.auth.tenantId, user_id: request.auth.user.id });
+    } catch {
+      // Fora de um contexto de requisição com logger (não deveria acontecer): o log é secundário.
+    }
     return true;
   }
 }

@@ -32,6 +32,8 @@ jobs:
       # psql (libpq rejeita ?schema=, por isso URLs separadas)
       ADMIN_PG_URL: postgresql://postgres:postgres@localhost:5432/megabot
       APP_PG_URL: postgresql://megabot_app:megabot_pass@localhost:5432/megabot
+      # O Next embute esta URL no bundle durante o build; por isso é obrigatória (ver apps/web/src/env.ts)
+      NEXT_PUBLIC_API_URL: http://localhost:3000
 
     steps:
       - name: Checkout repository
@@ -111,6 +113,13 @@ jobs:
 
       - name: Run Build
         run: pnpm build
+
+      # O contrato (openapi.json) e os tipos do web são GERADOS. Se alguém mudar um controller
+      # e esquecer de regenerar, este passo falha.
+      - name: Verify OpenAPI contract is up to date
+        run: |
+          pnpm openapi:generate
+          git diff --exit-code -- apps/api/openapi.json apps/web/src/lib/api/schema.d.ts
 
   docker-build:
     name: Build Docker Images

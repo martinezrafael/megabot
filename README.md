@@ -94,6 +94,20 @@ Sem essas variáveis o botão "Entrar com Google" mostra "indisponível" e o res
 
 ---
 
+## 🧱 Fundações da API e do web
+
+Detalhes em [docs/api/foundations.md](docs/api/foundations.md) e [docs/adr/0002-fundacoes-da-api.md](docs/adr/0002-fundacoes-da-api.md).
+
+- **Configuração validada (Zod):** se faltar variável ou ela for inválida, a API e o web não sobem e listam todos os erros. A API recusa o `BETTER_AUTH_SECRET` de exemplo: gere o seu com `openssl rand -base64 32`.
+- **Logs (pino):** cada requisição tem `request_id` (cabeçalho `x-request-id`) e, quando autenticada, `tenant_id` e `user_id`. Ajuste com `LOG_LEVEL`.
+- **Erros:** todas as rotas respondem no mesmo formato JSON, com o `requestId` para suporte.
+- **Rate limit:** por IP, com limite mais rígido em login/cadastro/reset. Atrás de proxy, configure `TRUST_PROXY`.
+- **Health:** `GET /health` (liveness) e `GET /health/ready` (banco).
+- **Contrato OpenAPI:** documentação em http://localhost:3000/docs (dev). O contrato fica em `apps/api/openapi.json` e os tipos do web são gerados dele. Depois de mudar um controller ou DTO, rode `pnpm openapi:generate` e faça commit (o CI confere).
+- **Web:** telas autenticadas ficam em `apps/web/src/app/(app)/`, com layout comum que valida a sessão. Para criar uma tela nova: adicione a pasta, o item em `components/app-nav.tsx` e o caminho no `matcher` de `middleware.ts`.
+
+---
+
 ## 🔗 Configuração de Webhooks Locais (Túnel HTTP)
 
 1. **Inicie o túnel apontando para a porta da API (`3000`):**

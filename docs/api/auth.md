@@ -4,6 +4,8 @@ Base URL (dev): `http://localhost:3000`. Todas as rotas `/api/auth/*` são atend
 [Better Auth](https://www.better-auth.com). Requisições do navegador devem enviar
 `credentials: 'include'` e a `Origin` precisa ser o `WEB_URL` configurado (CORS e CSRF).
 
+> Formato de erro, rate limit (429), request id e health: veja [foundations.md](foundations.md). O contrato completo está em `apps/api/openapi.json`.
+
 ## Sessão
 
 Cookie `better-auth.session_token` (httpOnly, `SameSite=Lax`), criado no login e na

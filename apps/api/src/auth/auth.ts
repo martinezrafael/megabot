@@ -1,5 +1,6 @@
 import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
+import { openAPI } from 'better-auth/plugins';
 import { prisma, provisionTenantForUser } from '@megabot/database';
 import type { AppConfig } from '../config';
 import { resetPasswordEmail, verificationEmail, type Mailer } from '../mailer';
@@ -17,13 +18,19 @@ function sendInBackground(mailer: Mailer, message: Parameters<Mailer['send']>[0]
 export interface CreateAuthOptions {
   config: AppConfig;
   mailer: Mailer;
+  /**
+   * Liga o plugin que descreve as rotas /api/auth/* em formato OpenAPI.
+   * Só é usado ao GERAR o contrato (scripts/generate-openapi.ts); a API em
+   * execução não expõe isso.
+   */
+  openApi?: boolean;
 }
 
 /**
  * Cria a instância do Better Auth. É uma função (e não uma constante) para
  * que os testes possam injetar um mailer falso e uma configuração própria.
  */
-export function createAuth({ config, mailer }: CreateAuthOptions) {
+export function createAuth({ config, mailer, openApi = false }: CreateAuthOptions) {
   return betterAuth({
     baseURL: config.authUrl,
     secret: config.authSecret,
@@ -57,6 +64,8 @@ export function createAuth({ config, mailer }: CreateAuthOptions) {
 
     // Login com Google (só liga se as credenciais existirem).
     socialProviders: config.google ? { google: config.google } : {},
+
+    plugins: openApi ? [openAPI({ disableDefaultReference: true })] : [],
 
     databaseHooks: {
       user: {

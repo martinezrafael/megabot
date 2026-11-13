@@ -1,31 +1,54 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
-import { toNodeHandler } from 'better-auth/node';
+import { json, type NextFunction, type Request, type Response } from 'express';
+import { Logger } from 'nestjs-pino';
 import { AppModule, type AppModuleOptions } from './app.module';
-import type { Auth } from './auth/auth';
-import { AUTH } from './auth/auth.tokens';
+import { REQUEST_ID_HEADER, requestIdMiddleware } from './logging/request-id';
+import { setupSwagger } from './openapi';
+
+const parseJson = json({ limit: '100kb' });
 
 /**
- * Monta a aplicação. Usado pelo main.ts e pelos testes.
+ * Lê o corpo JSON de todas as rotas, MENOS as de /api/auth: o Better Auth
+ * precisa receber o corpo ainda "cru" (um stream que ainda não foi lido).
+ */
+function jsonUnlessAuth(req: Request, res: Response, next: NextFunction) {
+  if (req.path.startsWith('/api/auth')) return next();
+  return parseJson(req, res, next);
+}
+
+/**
+ * Monta a aplicação. Usado pelo main.ts, pelo gerador de OpenAPI e pelos testes.
  */
 export async function createApp(options: AppModuleOptions): Promise<NestExpressApplication> {
-  // bodyParser: false -> o Better Auth precisa ler o corpo da requisição "cru".
-  // Reativamos o parser JSON logo abaixo, DEPOIS de registrar as rotas de auth.
+  const { config } = options;
+
+  // bodyParser: false -> registramos o nosso parser logo abaixo (ver jsonUnlessAuth).
+  // bufferLogs: guarda os logs de inicialização até o pino estar pronto.
   const app = await NestFactory.create<NestExpressApplication>(AppModule.register(options), {
     bodyParser: false,
-    logger: process.env.NODE_ENV === 'test' ? false : ['log', 'warn', 'error'],
+    bufferLogs: true,
   });
+  app.useLogger(app.get(Logger));
+
+  // Atrás de proxy/load balancer, é o que faz o rate limit enxergar o IP real.
+  app.set('trust proxy', config.trustProxy);
+  app.disable('x-powered-by');
+
+  // Request id o mais cedo possível: até erros de body-parser saem com ele.
+  app.use(requestIdMiddleware);
 
   // CORS: só o nosso front-end, com cookies (credentials).
-  app.enableCors({ origin: options.config.webUrl, credentials: true });
+  app.enableCors({
+    origin: config.webUrl,
+    credentials: true,
+    exposedHeaders: [REQUEST_ID_HEADER, 'retry-after'],
+  });
 
-  // Rotas de autenticação (/api/auth/*) são atendidas direto pelo Better Auth.
-  const auth = app.get<Auth>(AUTH);
-  app.getHttpAdapter().getInstance().all('/api/auth/*splat', toNodeHandler(auth));
+  app.use(jsonUnlessAuth);
 
-  // Para as demais rotas, o JSON volta a ser interpretado normalmente.
-  app.useBodyParser('json');
+  if (config.swaggerEnabled) await setupSwagger(app, config);
 
   return app;
 }

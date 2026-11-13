@@ -1,29 +1,24 @@
-import { cookies } from 'next/headers';
+import { cache } from 'react';
+import { cookies, headers } from 'next/headers';
+import { parseWebEnv } from '@/env';
+import { fetchMe, type Me } from './me';
 
-const API_URL = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
-
-export interface Me {
-  user: { id: string; email: string; name: string; image: string | null; emailVerified: boolean };
-  tenant: { id: string; role: 'OWNER' | 'ADMIN' | 'MEMBER' } | null;
-}
+export { safeNext, type Me } from './me';
 
 /**
- * Para Server Components: pergunta à API quem está logado, repassando o cookie
- * do navegador. Retorna null se não houver sessão válida.
- * (É a validação "de verdade" - o middleware só olha se o cookie existe.)
+ * Para Server Components: quem está logado? (null = ninguém)
+ * É a validação "de verdade" da sessão; o middleware só checa se o cookie existe.
+ *
+ * `cache` deduplica: layout e página chamam getMe() e a API é consultada UMA vez por requisição.
  */
-export async function getMe(): Promise<Me | null> {
-  const cookieStore = await cookies();
-  const response = await fetch(`${API_URL}/me`, {
-    headers: { cookie: cookieStore.toString() },
-    cache: 'no-store',
-  });
-  if (response.status === 401) return null;
-  if (!response.ok) throw new Error(`Falha ao consultar /me: ${response.status}`);
-  return (await response.json()) as Me;
-}
+export const getMe = cache(async (): Promise<Me | null> => {
+  const [cookieStore, requestHeaders] = await Promise.all([cookies(), headers()]);
+  const { serverApiUrl } = parseWebEnv(process.env);
 
-/** Só aceita caminhos internos (evita open redirect via ?next=). */
-export function safeNext(next: string | undefined): string {
-  return next && next.startsWith('/') && !next.startsWith('//') ? next : '/dashboard';
-}
+  return fetchMe({
+    apiUrl: serverApiUrl,
+    cookie: cookieStore.toString(),
+    forwardedFor: requestHeaders.get('x-forwarded-for') ?? undefined,
+    requestId: requestHeaders.get('x-request-id') ?? undefined,
+  });
+});
