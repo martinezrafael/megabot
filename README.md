@@ -6,7 +6,7 @@ Este repositório contém o ecossistema do **MegaBot** (`api`, `worker`, `web`).
 
 ## 📋 Pré-requisitos
 
-- **Node.js**: v20.12 ou superior
+- **Node.js**: v22.12 ou superior
 - **pnpm**: v10 (`npm i -g pnpm@10`)
 - **Docker** e **Docker Compose**
 - **ngrok** (opcional, para receber webhooks locais)
