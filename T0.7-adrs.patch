@@ -1,0 +1,571 @@
+diff --git a/.env.example b/.env.example
+index 62ebb98..ba728c9 100644
+--- a/.env.example
++++ b/.env.example
+@@ -31,8 +31,7 @@ MAIL_FROM="Megabot <no-reply@megabot.local>"
+ # SMTP_USER=
+ # SMTP_PASS=
+ 
+-# Fila / Redis (se utilizar para filas) ou Drizzle / BullMQ
+-# REDIS_URL=redis://localhost:6379
++# Filas usam pg-boss no próprio PostgreSQL (ADR 0005); Redis não é necessário.
+ 
+ # Webhooks / Local Tunnel (ngrok / localtunnel)
+ WEBHOOK_BASE_URL=https://seu-subdominio.ngrok-free.app
+diff --git a/README.md b/README.md
+index 4c934c6..0ed16fe 100644
+--- a/README.md
++++ b/README.md
+@@ -6,7 +6,7 @@ Este repositório contém o ecossistema do **MegaBot** (`api`, `worker`, `web`).
+ 
+ ## 📋 Pré-requisitos
+ 
+-- **Node.js**: v20.12 ou superior
++- **Node.js**: v22.12 ou superior
+ - **pnpm**: v10 (`npm i -g pnpm@10`)
+ - **Docker** e **Docker Compose**
+ - **ngrok** (opcional, para receber webhooks locais)
+diff --git a/docs/adr/0003-nestjs-com-typescript.md b/docs/adr/0003-nestjs-com-typescript.md
+new file mode 100644
+index 0000000..06564bb
+--- /dev/null
++++ b/docs/adr/0003-nestjs-com-typescript.md
+@@ -0,0 +1,36 @@
++# ADR 0003 — NestJS com TypeScript
++
++- **Status:** Aceita
++- **Data:** 2026-11-12
++- **Contexto da task:** T0.7
++
++## Contexto
++
++A API precisa receber webhooks do WhatsApp, expor endpoints para o painel, rodar autenticação,
++isolamento por tenant e integrações (cobrança, LLM). Vários módulos vão crescer em paralelo, então
++precisamos de uma estrutura que force organização e injeção de dependências.
++
++## Opções consideradas
++
++| Opção                   | Prós                                                                          | Contras                                               |
++| ----------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------- |
++| **NestJS + TypeScript** | Módulos, DI, guards/pipes/filters; ecossistema (Swagger, Terminus, Throttler) | Mais cerimônia (decorators); curva de aprendizado     |
++| Fastify/Express "puro"  | Leve, poucas abstrações                                                       | Cada pessoa organiza de um jeito; DI e padrões à mão  |
++| Hono / Elysia           | Muito rápido e enxuto                                                         | Ecossistema menor para o que precisamos (OpenAPI, DI) |
++
++## Decisão
++
++Usar **NestJS 11 (adaptador Express 5) com TypeScript** em `apps/api`, compilado com **SWC**.
++Contrato validado com **Zod** (ADR 0002) e documentado com OpenAPI.
++
++## Justificativa
++
++- Estrutura padronizada reduz divergência entre módulos e facilita revisão.
++- Guards, interceptors e filters encaixam direto em multitenancy, autenticação e logs.
++- TypeScript no monorepo inteiro permite compartilhar tipos (`packages/*`) entre API e web.
++
++## Consequências
++
++- Decorators exigem `experimentalDecorators`/`emitDecoratorMetadata`; por isso o build usa SWC com config dedicada.
++- O worker (pg-boss, ADR 0005) pode reutilizar módulos Nest como _standalone application_.
++- Trocar de framework no futuro seria caro; a regra de negócio deve ficar em serviços sem dependência de HTTP.
+diff --git a/docs/adr/0004-prisma-e-postgresql.md b/docs/adr/0004-prisma-e-postgresql.md
+new file mode 100644
+index 0000000..abe4e72
+--- /dev/null
++++ b/docs/adr/0004-prisma-e-postgresql.md
+@@ -0,0 +1,40 @@
++# ADR 0004 — Prisma + PostgreSQL com RLS
++
++- **Status:** Aceita
++- **Data:** 2026-11-12
++- **Contexto da task:** T0.7 (decisão originada na T0.4)
++
++## Contexto
++
++O produto é multitenant. O isolamento entre clientes não pode depender só de `WHERE tenant_id`
++escrito à mão em cada consulta. Também precisaremos de busca vetorial (base de conhecimento) e de
++filas (ADR 0005), idealmente sem infraestrutura extra.
++
++## Opções consideradas
++
++| Opção                   | Prós                                                                   | Contras                                           |
++| ----------------------- | ---------------------------------------------------------------------- | ------------------------------------------------- |
++| **Prisma + PostgreSQL** | Schema tipado, migrações versionadas, RLS nativa do Postgres, pgvector | Consultas muito específicas exigem SQL cru        |
++| Drizzle + PostgreSQL    | SQL mais próximo, leve                                                 | Migrações e ergonomia menos maduras para o time   |
++| TypeORM                 | Integra com Nest                                                       | Tipagem mais fraca, manutenção irregular          |
++| MongoDB                 | Esquema flexível                                                       | Sem RLS; transações e relacionamentos mais pobres |
++
++## Decisão
++
++- **PostgreSQL 16** (imagem `pgvector/pgvector:pg16`) como único banco.
++- **Prisma 7** com `@prisma/adapter-pg`; migrações SQL versionadas em `packages/database`.
++- **Row Level Security** com `FORCE ROW LEVEL SECURITY`; o contexto vem das variáveis de sessão
++  `app.tenant_id` e `app.user_id`, definidas por transação.
++- A aplicação conecta com um usuário **sem** `BYPASSRLS` nem superusuário.
++
++## Justificativa
++
++RLS garante isolamento mesmo se uma consulta esquecer o filtro. Prisma dá tipos e migrações; SQL cru
++continua disponível para RLS, índices e pgvector.
++
++## Consequências
++
++- Todo acesso a dados do tenant roda dentro de transação que define `app.tenant_id` (senão retorna vazio).
++- Migrações que criam tabelas novas devem incluir políticas RLS e testes de isolamento.
++- Cliente gerado precisa de `prisma generate` no build e no CI.
++- Banco gerenciado deve suportar a extensão `pgvector` (restrição para o ADR 0008).
+diff --git a/docs/adr/0005-pg-boss-para-filas.md b/docs/adr/0005-pg-boss-para-filas.md
+new file mode 100644
+index 0000000..7537fea
+--- /dev/null
++++ b/docs/adr/0005-pg-boss-para-filas.md
+@@ -0,0 +1,39 @@
++# ADR 0005 — pg-boss para filas e jobs
++
++- **Status:** Aceita
++- **Data:** 2026-11-12
++- **Contexto da task:** T0.7
++
++## Contexto
++
++Precisamos processar em segundo plano: mensagens recebidas do WhatsApp (webhook responde rápido e
++enfileira), chamadas ao LLM, envio de mensagens, cobranças e tarefas agendadas. Os jobs precisam
++de retentativas, _backoff_, idempotência e visibilidade de falhas.
++
++## Opções consideradas
++
++| Opção                   | Prós                                                                                         | Contras                                          |
++| ----------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------ |
++| **pg-boss**             | Usa o Postgres que já temos (`SKIP LOCKED`); retentativas, cron, DLQ, prioridades; sem Redis | Throughput menor que Redis; carga extra no banco |
++| BullMQ (Redis)          | Muito maduro e rápido; UI de filas                                                           | Exige Redis (custo, operação, persistência)      |
++| Cloud queues (SQS etc.) | Gerenciado                                                                                   | Acopla ao provedor; ainda indefinido (ADR 0008)  |
++
++## Decisão
++
++Usar **pg-boss** para filas e agendamentos, em um processo separado (`apps/worker`), no mesmo
++PostgreSQL, em schema próprio (`pgboss`). A variável `REDIS_URL` comentada no `.env.example` deixa
++de fazer parte do plano.
++
++## Justificativa
++
++Um serviço a menos para operar e pagar; jobs e dados de negócio na mesma base facilitam consistência
++(ex.: enfileirar na mesma transação). O volume previsto do MVP é bem abaixo do limite do pg-boss.
++
++## Consequências
++
++- **Requisitos:** Node ≥ 22.12 e PostgreSQL ≥ 13. O README ainda dizia Node ≥ 20.12; foi atualizado
++  (CI e Dockerfile já usam Node 22).
++- O worker precisa de permissão para criar o schema `pgboss` (migração/instalação inicial pelo pg-boss).
++- Handlers devem ser **idempotentes** (entrega _at-least-once_).
++- Se o throughput crescer, o ponto de revisão é migrar para BullMQ/Redis; manter os handlers atrás de uma interface fina.
++- Pool de conexões do worker deve ser dimensionado junto com o da API.
+diff --git a/docs/adr/0006-node-test-para-testes.md b/docs/adr/0006-node-test-para-testes.md
+new file mode 100644
+index 0000000..a38b10e
+--- /dev/null
++++ b/docs/adr/0006-node-test-para-testes.md
+@@ -0,0 +1,33 @@
++# ADR 0006 — node:test para testes
++
++- **Status:** Aceita
++- **Data:** 2026-11-12
++- **Contexto da task:** T0.7
++
++## Contexto
++
++Precisamos de testes unitários e de integração (inclusive contra Postgres real, para validar RLS)
++com baixa configuração e execução rápida no CI.
++
++## Opções consideradas
++
++| Opção               | Prós                                                    | Contras                                                    |
++| ------------------- | ------------------------------------------------------- | ---------------------------------------------------------- |
++| **node:test + tsx** | Embutido no Node; zero dependência de framework; rápido | Menos recursos (snapshots, mocks de módulo mais limitados) |
++| Vitest              | Ótima DX, mocks, watch                                  | Dependência extra; sobreposição com o runner nativo        |
++| Jest                | Muito conhecido                                         | Pesado, configuração com ESM/TS mais trabalhosa            |
++
++## Decisão
++
++Usar **`node:test`** com `node:assert/strict`, executando TypeScript via **`tsx`**
++(`tsx --test`), em cada pacote/app. Testes de integração usam o Postgres do `docker compose`/CI.
++
++## Justificativa
++
++Menos ferramentas para manter e atualizar; o Node já traz _runner_, _mocking_ básico e cobertura.
++
++## Consequências
++
++- Nada de `jest.fn`/`vi.mock`: usar `mock` de `node:test` ou injetar dependências.
++- Testes que tocam o banco precisam do serviço no ar (`pnpm db:up`) e do usuário sem `BYPASSRLS`.
++- Se a necessidade de recursos avançados crescer, reavaliar com um novo ADR (Vitest é o candidato).
+diff --git a/docs/adr/0007-cobranca.md b/docs/adr/0007-cobranca.md
+new file mode 100644
+index 0000000..1bafcb6
+--- /dev/null
++++ b/docs/adr/0007-cobranca.md
+@@ -0,0 +1,47 @@
++# ADR 0007 — Cobrança
++
++- **Status:** Proposta (aguarda confirmação do responsável pelo negócio)
++- **Data:** 2026-11-12
++- **Contexto da task:** T0.7
++
++## Contexto
++
++O MegaBot será vendido por assinatura mensal a empresas brasileiras. Precisamos cobrar de forma
++recorrente, receber **Pix** e **boleto** (comuns no B2B brasileiro), além de cartão, e reagir a
++pagamento/atraso/cancelamento por **webhook** para ajustar o plano e a cota (ADR 0011).
++
++## Opções consideradas
++
++| Opção                          | Prós                                                                                                       | Contras                                                                                 |
++| ------------------------------ | ---------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
++| **Asaas — Assinaturas**        | Pix, boleto e cartão; cobrança recorrente automática (cartão); webhooks; foco no Brasil; emite NF opcional | Cobrança por boleto/Pix gera fatura que o cliente precisa pagar (sem débito automático) |
++| Asaas — Pix Automático         | Débito recorrente autorizado no Pix, menos atrito                                                          | Só Pix; depende de o banco do cliente suportar; adoção ainda crescendo                  |
++| Stripe                         | API excelente, boa documentação, cartão recorrente robusto                                                 | Pix/boleto com recorrência menos naturais; menos adequado ao fluxo fiscal brasileiro    |
++| Mercado Pago / Pagar.me / Iugu | Opções locais                                                                                              | Não avaliadas em profundidade                                                           |
++
++## Decisão (proposta)
++
++Usar **Asaas — Assinaturas** como provedor inicial, por trás de uma interface interna
++`BillingProvider` (criar cliente, criar assinatura, cancelar, consultar). Pix Automático fica como
++evolução. Eventos chegam por **webhook** com validação de token e **idempotência** por id do evento,
++processados via pg-boss (ADR 0005).
++
++## Justificativa
++
++Atende o meio de pagamento predominante no Brasil sem exigir cartão, e a interface isolada evita
++acoplar o domínio ao fornecedor.
++
++## Consequências
++
++- Nova tabela de assinatura/fatura por tenant e estados: `trial`, `ativa`, `inadimplente`, `cancelada`.
++- Segredos (`ASAAS_API_KEY`, token de webhook) entram no `.env.example` e na validação de ambiente.
++- Ambiente _sandbox_ do Asaas para testes; webhook precisa de URL pública (ver `WEBHOOK_BASE_URL`).
++- Conformidade: não armazenamos dados de cartão (o Asaas é o PCI).
++
++## Decisões pendentes
++
++- Confirmar o provedor (Asaas vs. Stripe) — **responsável: negócio**.
++- Planos, preços e período de _trial_.
++- Política de inadimplência (carência antes de bloquear; ver ADR 0011).
++- Emissão de nota fiscal: necessária no MVP?
++- Taxas e condições comerciais atuais devem ser conferidas direto no Asaas antes de fechar (não validadas aqui).
+diff --git a/docs/adr/0008-hospedagem.md b/docs/adr/0008-hospedagem.md
+new file mode 100644
+index 0000000..fe2e107
+--- /dev/null
++++ b/docs/adr/0008-hospedagem.md
+@@ -0,0 +1,49 @@
++# ADR 0008 — Hospedagem
++
++- **Status:** Pendente
++- **Data:** 2026-11-12
++- **Contexto da task:** T0.7
++
++## Contexto
++
++Precisamos hospedar: API (NestJS), worker (pg-boss), web (Next.js) e PostgreSQL 16 com `pgvector`.
++Requisitos que já sabemos:
++
++- Containers Docker (existe Dockerfile da API com `HEALTHCHECK`; `/health/ready` disponível).
++- PostgreSQL gerenciado com **extensão pgvector**, backups e usuário de aplicação sem `BYPASSRLS`.
++- **Latência baixa para o Brasil** (usuários e API do WhatsApp) e atenção à LGPD (dados de clientes brasileiros).
++- URL pública estável para os webhooks do WhatsApp e do provedor de cobrança.
++- Worker rodando 24/7 (não pode ser _serverless_ que hiberna).
++- Custo previsível no MVP.
++
++## Opções consideradas
++
++| Opção                                  | Prós                                                                | Contras                                                                             |
++| -------------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
++| PaaS (Railway / Render / Fly.io)       | Deploy simples de containers; Postgres gerenciado; barato para MVP  | Regiões no Brasil variam — **verificar disponibilidade** de São Paulo e de pgvector |
++| Cloud grande (AWS / GCP / Azure)       | Região São Paulo, RDS/Cloud SQL com pgvector, escala e conformidade | Mais operação (rede, IAM, IaC) e custo base maior                                   |
++| VPS (Hetzner / DigitalOcean / Locaweb) | Preço baixo e controle total                                        | Operação manual: backups, atualização, HA                                           |
++| Web na Vercel + API/worker em outro    | Melhor experiência para Next.js                                     | Duas plataformas; CORS/cookies entre domínios; ver `NEXT_PUBLIC_API_URL`            |
++
++> Observação: não foi possível confirmar nesta sessão as regiões e preços atuais de Fly.io/Render
++> (documentação fora do acesso). Esses itens devem ser verificados antes da decisão.
++
++## Decisão
++
++**Ainda não tomada.** Recomendação provisória para o MVP: PaaS com containers e Postgres gerenciado
++(com pgvector) na região mais próxima do Brasil; migrar para cloud grande se exigências de escala
++ou conformidade surgirem. Sem PaaS que atenda aos requisitos, usar AWS em `sa-east-1`.
++
++## Consequências (válidas qualquer que seja a escolha)
++
++- A aplicação segue **12-factor**: config por variáveis de ambiente, logs em stdout (pino), `/health/*` para probes.
++- `TRUST_PROXY` e `NEXT_PUBLIC_API_URL` precisam ser definidos no deploy (ADR 0002).
++- Rate limit em memória (ADR 0002) assume 1 instância da API; com várias, trocar por _store_ compartilhado.
++- Domínios: um para o painel e um para a API/webhooks, ambos com HTTPS.
++
++## Decisões pendentes
++
++- Provedor e região — **responsável: time técnico + negócio** (orçamento).
++- Ambientes: apenas `produção` + `local`, ou também `staging`?
++- Política de backup/retenção e RPO/RTO desejados.
++- Domínio e DNS.
+diff --git a/docs/adr/0009-provedor-de-llm.md b/docs/adr/0009-provedor-de-llm.md
+new file mode 100644
+index 0000000..3532880
+--- /dev/null
++++ b/docs/adr/0009-provedor-de-llm.md
+@@ -0,0 +1,45 @@
++# ADR 0009 — Provedor de LLM
++
++- **Status:** Proposta
++- **Data:** 2026-11-12
++- **Contexto da task:** T0.7
++
++## Contexto
++
++O bot responde clientes pelo WhatsApp usando a base de conhecimento do tenant (RAG com pgvector).
++Precisamos de um modelo com boa qualidade em português, latência baixa, custo previsível,
++_tool/function calling_ e saída estruturada. O `.env.example` já assume `OPENAI_API_KEY`.
++
++## Opções consideradas
++
++| Opção                      | Prós                                                          | Contras                                                   |
++| -------------------------- | ------------------------------------------------------------- | --------------------------------------------------------- |
++| **OpenAI**                 | Já previsto no projeto; embeddings e chat no mesmo fornecedor | Dependência de um fornecedor; dados saem do Brasil        |
++| Anthropic (Claude)         | Forte em seguir instruções e em português                     | Embeddings próprios não oferecidos (exige outro provedor) |
++| Google (Gemini)            | Custo competitivo, contexto longo                             | Mais uma integração                                       |
++| Modelo próprio/open source | Controle de dados                                             | Operação de GPU; custo e qualidade difíceis no MVP        |
++
++## Decisão (proposta)
++
++Começar com **OpenAI** (chat + embeddings), acessado por uma interface interna `LlmProvider`
++(`generate`, `embed`) para permitir trocar ou combinar provedores sem alterar o domínio.
++Modelos e preços **não** são fixados neste ADR (mudam com frequência): ficam em configuração.
++
++## Justificativa
++
++Menor atrito imediato (chave já prevista, um fornecedor para chat e embeddings). A interface mantém
++a opção de migrar se qualidade, custo ou política de dados pedirem.
++
++## Consequências
++
++- Dimensão dos embeddings define o tipo `vector(N)` no banco: trocar de modelo de embedding exige reindexar.
++- Chamadas ao LLM rodam em jobs (pg-boss) com timeout, retentativa e limite de concorrência.
++- Registrar uso (tokens) por tenant, base para custo e para a cota (ADR 0011).
++- LGPD: informar nos termos que o conteúdo das conversas é processado por terceiro; avaliar acordo de processamento de dados.
++- Prompts: nunca incluir dados de outros tenants no contexto (reforçado pelo RLS).
++
++## Decisões pendentes
++
++- Confirmar OpenAI (ou outro) e **modelos** de chat e embedding — **responsável: time técnico**.
++- Orçamento mensal por tenant/plano.
++- Plano de _fallback_ se o provedor ficar indisponível (resposta padrão ou transferência para humano).
+diff --git a/docs/adr/0010-janela-de-conversa-24h.md b/docs/adr/0010-janela-de-conversa-24h.md
+new file mode 100644
+index 0000000..f6f73b8
+--- /dev/null
++++ b/docs/adr/0010-janela-de-conversa-24h.md
+@@ -0,0 +1,65 @@
++# ADR 0010 — Regra da conversa: janela de 24h por contato
++
++- **Status:** Aceita (a regra base vem da plataforma do WhatsApp; os pontos em "Decisões pendentes" são de produto)
++- **Data:** 2026-11-12
++- **Contexto da task:** T0.7
++
++## Contexto
++
++O WhatsApp Business Platform só permite mensagens livres dentro de uma **janela de atendimento de
++24 horas**. A janela é aberta e renovada **somente por mensagem do cliente**. Fora dela, só é
++possível enviar **templates aprovados**, que a Meta cobra por mensagem entregue (modelo vigente
++desde 1º/07/2025). A Meta também prevê uma janela de 72h gratuita para contatos vindos de anúncios
++_click-to-WhatsApp_ ou botões de página.
++
++Precisamos definir, de forma objetiva, o que é uma "conversa" no MegaBot — base do comportamento
++do bot e da cota (ADR 0011).
++
++> Nota: a documentação oficial da Meta não pôde ser acessada nesta sessão; as regras acima vieram de fontes
++> secundárias recentes. **Conferir na documentação oficial antes de implementar** e rever este ADR se divergir.
++> Preços da Meta mudam por país e por data; não são fixados aqui.
++
++## Decisão
++
++1. **Chave da conversa:** `(tenant_id, contato)`, onde o contato é o número do cliente em formato E.164.
++   Um contato tem no máximo **uma janela ativa** por tenant.
++2. **Abertura:** a primeira mensagem **recebida** do contato, quando não há janela ativa, abre uma
++   janela com `inicio = instante da mensagem` e `expira_em = inicio + 24h`.
++3. **Renovação:** cada nova mensagem **recebida** do contato com a janela ativa move `expira_em`
++   para `instante da mensagem + 24h` (janela deslizante, como na plataforma). Renovar **não** abre
++   nova conversa. Mensagens enviadas pelo bot ou por atendente **não** renovam.
++4. **Dentro da janela:** o bot e atendentes podem enviar mensagens livres (texto, mídia, etc.).
++5. **Fora da janela (expirada ou inexistente):** envio livre é **bloqueado**. Só é permitido enviar
++   um **template aprovado**; no MVP, o bot **não** inicia conversas por template (ver pendências).
++   Mensagem do bot que perderia a janela é descartada com registro (`janela_expirada`), nunca enviada.
++6. **Verificação no envio:** a checagem de janela acontece **no momento do envio** (no worker, ADR
++   0005), não no enfileiramento, pois a janela pode expirar enquanto o job espera.
++7. **Idempotência:** o id da mensagem do WhatsApp deduplica reentregas de webhook; uma mensagem
++   duplicada não abre nem renova janela duas vezes.
++8. **Fuso e relógio:** todos os instantes são armazenados em UTC; a contagem usa o horário do
++   servidor/Meta (timestamp da mensagem), nunca o do cliente.
++9. **Conversa ≠ ticket:** a "conversa" para cota (ADR 0011) é uma **janela aberta**. Várias
++   mensagens e renovações dentro dela contam como **uma** conversa.
++10. **Canal de anúncio (72h):** mensagens oriundas de anúncios CTWA podem ter janela gratuita de
++    72h na Meta. Fica **fora do MVP**: tratamos como janela comum de 24h.
++
++## Justificativa
++
++Espelhar a regra da plataforma evita enviar mensagens que a Meta rejeitaria e dá uma unidade clara,
++auditável e idempotente para medir uso e cobrar (cota).
++
++## Consequências
++
++- Tabela `conversa_janela` (tenant, contato, inicio, expira_em, ultima_mensagem_recebida_em) com
++  RLS e índice único parcial garantindo uma janela ativa por `(tenant_id, contato)`.
++- Abrir/renovar janela é operação atômica (`INSERT ... ON CONFLICT` ou `UPDATE ... RETURNING`) para
++  suportar webhooks concorrentes.
++- Camada de envio recusa mensagem livre sem janela ativa: erro de domínio explícito, coberto por testes
++  (limite exato de 24h, renovação, duplicata, concorrência).
++- Atendente humano vê o tempo restante da janela na interface.
++
++## Decisões pendentes
++
++- O bot poderá **iniciar** conversa por template (reengajamento/avisos)? Muda custo e cota — **produto**.
++- Tratar a janela de 72h de anúncios CTWA? — **produto**, quando houver campanhas.
++- Mensagem automática ao cliente quando a janela está para expirar (ex.: 1h antes)? — **produto**.
+diff --git a/docs/adr/0011-regra-de-cota.md b/docs/adr/0011-regra-de-cota.md
+new file mode 100644
+index 0000000..5952c89
+--- /dev/null
++++ b/docs/adr/0011-regra-de-cota.md
+@@ -0,0 +1,62 @@
++# ADR 0011 — Regra de cota
++
++- **Status:** Proposta (limites numéricos pendentes de decisão do negócio)
++- **Data:** 2026-11-12
++- **Contexto da task:** T0.7
++
++## Contexto
++
++Cada plano contratado (ADR 0007) deve ter um limite de uso para manter o custo previsível
++(LLM, ADR 0009, e mensagens WhatsApp). Precisamos de uma regra **medível, idempotente e justa**,
++com comportamento claro ao se aproximar e ao atingir o limite.
++
++## Opções consideradas
++
++| Unidade da cota                          | Prós                                                | Contras                                             |
++| ---------------------------------------- | --------------------------------------------------- | --------------------------------------------------- |
++| **Conversas (janelas de 24h, ADR 0010)** | Simples de explicar; alinhada ao modelo do WhatsApp | Uma conversa longa e uma curta contam igual         |
++| Mensagens                                | Fácil de contar                                     | Pune conversas naturais com muitas mensagens curtas |
++| Tokens do LLM                            | Reflete o custo real                                | Incompreensível para o cliente                      |
++
++## Decisão (proposta)
++
++**Cota por número de conversas por mês, por tenant**, conforme o plano.
++
++1. **Contagem:** +1 quando uma janela é **aberta** (ADR 0010, regra 2). Renovações, mensagens extras e
++   respostas do bot não contam. Reentrega de webhook não conta (idempotência pelo id da janela).
++2. **Período:** mês de calendário; **fuso `America/Sao_Paulo`**, zera no dia 1º às 00:00. Conversa conta
++   no período em que a janela foi **aberta**, mesmo que termine no mês seguinte.
++3. **Limite:** `limite_conversas_mes` definido pelo plano (valores abaixo em pendências).
++4. **Aviso a 80%:** notificar o tenant (painel + e-mail) uma única vez no período.
++5. **Ao atingir 100% (limite):** **novas** conversas não são atendidas pelo bot; o contato recebe uma
++   mensagem padrão (se a janela permitir) e o tenant é avisado. Conversas **já abertas** continuam
++   até expirar (não se corta atendimento no meio).
++6. **Sem franquia automática paga:** o MVP **não** cobra excedente; o tenant faz _upgrade_ de plano
++   para liberar mais cota imediatamente.
++7. **Inadimplência:** assinatura `inadimplente` segue a carência definida no ADR 0007; vencida a
++   carência, a cota efetiva é 0 (nenhuma nova conversa). Dados e painel continuam acessíveis.
++8. **Trial:** usa a cota do plano de trial, sem renovação mensal.
++9. **Atomicidade:** reservar a cota e abrir a janela na **mesma transação**, para que requisições
++   concorrentes não ultrapassem o limite.
++10. **Auditoria:** cada conversa contada guarda `periodo`, `janela_id`; o consumo é recalculável.
++
++## Justificativa
++
++Conversa é a unidade que o cliente entende e que acompanha a plataforma do WhatsApp; bloquear só
++**novas** conversas protege a experiência de quem já está sendo atendido.
++
++## Consequências
++
++- Tabelas: `plano` (limites) e contador por `(tenant_id, periodo)` com RLS; contador atualizado
++  atomicamente (`UPDATE ... WHERE usado < limite RETURNING`).
++- Webhook decide "janela nova?" antes de enfileirar para o LLM; sem cota, nem chama o LLM (economiza custo).
++- O painel mostra consumo atual, limite e data de renovação.
++- Ajuste manual de cota (suporte) deve ser registrado.
++
++## Decisões pendentes
++
++- **Limites por plano** (ex.: quantas conversas/mês em cada plano) — **negócio**.
++- Cobrar **excedente** em vez de bloquear? — **negócio**.
++- Mensagem padrão ao bloquear novas conversas (texto e se existe transferência para humano) — **produto**.
++- Limite adicional de tokens por tenant como proteção de custo? — **time técnico**.
++- Fuso do período por tenant, em vez de fixo em São Paulo — adiar até haver clientes fora do Brasil.
+diff --git a/docs/adr/README.md b/docs/adr/README.md
+new file mode 100644
+index 0000000..644baaa
+--- /dev/null
++++ b/docs/adr/README.md
+@@ -0,0 +1,68 @@
++# Registro de decisões (ADRs)
++
++Cada decisão técnica ou de negócio relevante do MegaBot vira um ADR (_Architecture Decision Record_):
++um arquivo curto, versionado junto com o código, que explica **o que** foi decidido e **por quê**.
++
++## Índice
++
++| Nº                                     | Decisão                                       | Status   |
++| -------------------------------------- | --------------------------------------------- | -------- |
++| [0001](0001-autenticacao.md)           | Provedor de autenticação (Better Auth)        | Aceita   |
++| [0002](0002-fundacoes-da-api.md)       | Fundações da API (Zod, pino, throttler, ...)  | Aceita   |
++| [0003](0003-nestjs-com-typescript.md)  | NestJS com TypeScript                         | Aceita   |
++| [0004](0004-prisma-e-postgresql.md)    | Prisma + PostgreSQL com RLS                   | Aceita   |
++| [0005](0005-pg-boss-para-filas.md)     | pg-boss para filas e jobs                     | Aceita   |
++| [0006](0006-node-test-para-testes.md)  | node:test para testes                         | Aceita   |
++| [0007](0007-cobranca.md)               | Cobrança (Asaas)                              | Proposta |
++| [0008](0008-hospedagem.md)             | Hospedagem                                    | Pendente |
++| [0009](0009-provedor-de-llm.md)        | Provedor de LLM                               | Proposta |
++| [0010](0010-janela-de-conversa-24h.md) | Regra da conversa (janela de 24h por contato) | Aceita   |
++| [0011](0011-regra-de-cota.md)          | Regra de cota                                 | Proposta |
++
++## Status
++
++- **Aceita** — decidido e em uso (ou pronto para uso). Só muda por um novo ADR.
++- **Proposta** — há uma recomendação, mas falta confirmação de quem decide.
++- **Pendente** — faltam informações ou escolha; as opções estão documentadas.
++- **Substituída** — trocada por outro ADR (indicar qual).
++
++## Como criar um novo ADR
++
++1. Copie o modelo abaixo para `docs/adr/NNNN-titulo-curto.md` (próximo número livre).
++2. Preencha, abra PR e adicione a linha no índice acima.
++3. Nunca reescreva uma decisão aceita: crie um novo ADR que a substitua e marque o antigo como _Substituída_.
++
++## Modelo
++
++```md
++# ADR NNNN — Título
++
++- **Status:** Proposta | Aceita | Pendente | Substituída por NNNN
++- **Data:** AAAA-MM-DD
++- **Contexto da task:** Tx.y
++
++## Contexto
++
++Qual problema estamos resolvendo e quais restrições existem.
++
++## Opções consideradas
++
++| Opção | Prós | Contras |
++| ----- | ---- | ------- |
++
++## Decisão
++
++O que foi escolhido, de forma objetiva.
++
++## Justificativa
++
++Por que esta opção venceu as outras.
++
++## Consequências
++
++Efeitos técnicos (bons e ruins) e o que muda no dia a dia.
++
++## Decisões pendentes
++
++O que ainda precisa ser definido, por quem.
++```
