@@ -378,10 +378,15 @@ describe('WhatsAppClient — erros', () => {
       (e: unknown) => e instanceof WhatsAppNetworkError && e.retryable && !e.timedOut,
     );
 
-    // fetch que respeita o AbortSignal, como o real: o timeout cancela a requisição
+    // O timer de AbortSignal.timeout NÃO mantém o Node vivo (no fetch real, o socket mantém);
+    // por isso seguramos o processo com um timer próprio até a requisição ser abortada.
     const respectingFetch = (async (_url: unknown, init?: RequestInit) =>
       new Promise<Response>((_resolve, reject) => {
-        init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+        const keepAlive = setTimeout(() => {}, 10_000);
+        init?.signal?.addEventListener('abort', () => {
+          clearTimeout(keepAlive);
+          reject(init.signal?.reason);
+        });
       })) as typeof fetch;
     const client = new WhatsAppClient({
       accessToken: 't',
