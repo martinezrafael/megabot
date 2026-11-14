@@ -1,0 +1,52 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "102290129340398",
+      "changes": [
+        {
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "15550783881",
+              "phone_number_id": "106540352242922"
+            },
+            "contacts": [
+              {
+                "profile": {
+                  "name": "Sheena Nelson"
+                },
+                "wa_id": "16505551234"
+              }
+            ],
+            "messages": [
+              {
+                "from": "16505551234",
+                "id": "wamid.HBgLMTY1MDM4Nzk0MzkVAgASGBQzQTRBNjU5OUFFRTAzODEwMTQ0RgA=",
+                "timestamp": "1749416383",
+                "type": "text",
+                "text": {
+                  "body": "Quero saber o preço"
+                },
+                "context": {
+                  "from": "15550783881",
+                  "id": "wamid.ORIG"
+                },
+                "referral": {
+                  "source_url": "https://fb.me/ad",
+                  "source_id": "123",
+                  "source_type": "ad",
+                  "headline": "Promo",
+                  "body": "Aproveite",
+                  "media_type": "image",
+                  "ctwa_clid": "clid-1"
+                }
+              }
+            ]
+          },
+          "field": "messages"
+        }
+      ]
+    }
+  ]
+}

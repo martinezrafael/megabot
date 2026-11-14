@@ -1,0 +1,24 @@
+{
+  "name": "@megabot/whatsapp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cliente da WhatsApp Cloud API (envio) e parser de webhooks (recebimento)",
+  "main": "./dist/index.js",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "swc src -d dist --strip-leading-paths --config-file ../config/swc/.swcrc -C module.type=commonjs",
+    "lint": "eslint .",
+    "check-types": "tsc --noEmit",
+    "test": "node --import tsx --test --test-concurrency=1 \"tests/**/*.test.ts\""
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@megabot/eslint-config": "workspace:*",
+    "@megabot/tsconfig": "workspace:*",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.0.0"
+  }
+}

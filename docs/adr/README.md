@@ -18,6 +18,7 @@ um arquivo curto, versionado junto com o código, que explica **o que** foi deci
 | [0009](0009-provedor-de-llm.md)        | Provedor de LLM                               | Proposta |
 | [0010](0010-janela-de-conversa-24h.md) | Regra da conversa (janela de 24h por contato) | Aceita   |
 | [0011](0011-regra-de-cota.md)          | Regra de cota                                 | Proposta |
+| [0012](0012-pacote-whatsapp.md)        | Pacote `@megabot/whatsapp`                    | Aceita   |
 
 ## Status
 
