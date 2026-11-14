@@ -205,6 +205,28 @@ importers:
         specifier: ^5.0.0
         version: 5.9.3
 
+  packages/whatsapp:
+    dependencies:
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@megabot/eslint-config':
+        specifier: workspace:*
+        version: link:../config/eslint
+      '@megabot/tsconfig':
+        specifier: workspace:*
+        version: link:../config/tsconfig
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.5
+      tsx:
+        specifier: ^4.19.0
+        version: 4.23.15
+      typescript:
+        specifier: ^5.0.0
+        version: 5.9.3
+
 packages:
 
   '@babel/code-frame@7.29.7':

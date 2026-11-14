@@ -62,6 +62,10 @@ O isolamento entre empresas (tenants) é garantido pelo próprio PostgreSQL, com
 
 Os testes de integração usam o banco local. Antes de `pnpm test`, o container deve estar no ar e as migrations aplicadas.
 
+## 💬 WhatsApp
+
+O envio de mensagens e a leitura dos webhooks da Cloud API ficam em `packages/whatsapp`. Uso, tipos de evento, erros e métricas: [packages/whatsapp/README.md](packages/whatsapp/README.md).
+
 ---
 
 ## 🔐 Autenticação (Better Auth)
