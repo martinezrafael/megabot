@@ -62,6 +62,9 @@ importers:
       '@megabot/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@megabot/whatsapp':
+        specifier: workspace:*
+        version: link:../../packages/whatsapp
       '@nestjs/common':
         specifier: ^11.0.0
         version: 11.2.9(reflect-metadata@0.2.2)(rxjs@7.8.2)

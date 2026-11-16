@@ -6,6 +6,7 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
 enum Role {
   OWNER
   ADMIN
@@ -13,12 +14,14 @@ enum Role {
 }
 
 model Tenant {
-  id        String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name      String       @db.VarChar(255)
-  slug      String       @unique @db.VarChar(255)
-  createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
-  members   Membership[]
+  id                  String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                String               @db.VarChar(255)
+  slug                String               @unique @db.VarChar(255)
+  createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  members             Membership[]
+  whatsappConnections WhatsappConnection[]
+  webhookEvents       WebhookEvent[]
 
   @@map("tenants")
 }
@@ -107,4 +110,49 @@ model Membership {
   @@index([tenantId])
   @@index([userId])
   @@map("memberships")
+}
+
+// ---------------------------------------------------------------------------
+// WhatsApp (T1.2). Ambas têm RLS (ver migration *_whatsapp_webhook).
+// ---------------------------------------------------------------------------
+
+/// Liga um número do WhatsApp (phone_number_id) a um tenant. O número é único no sistema inteiro.
+model WhatsappConnection {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId           String   @map("tenant_id") @db.Uuid
+  phoneNumberId      String   @unique @map("phone_number_id")
+  wabaId             String   @map("waba_id")
+  displayPhoneNumber String?  @map("display_phone_number")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("whatsapp_connections")
+}
+
+/// Caixa de entrada dos webhooks. `eventKey` é único por tenant: reenvio da Meta não duplica.
+/// `kind` ∈ message | status | error e `processStatus` ∈ pending | processed | failed (CHECK no banco).
+model WebhookEvent {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId      String    @map("tenant_id") @db.Uuid
+  phoneNumberId String    @map("phone_number_id")
+  eventKey      String    @map("event_key")
+  kind          String
+  wamid         String?
+  status        String?
+  /// Quando o evento aconteceu (hora da Meta), não quando chegou.
+  eventAt       DateTime  @map("event_at") @db.Timestamptz(6)
+  payload       Json
+  processStatus String    @default("pending") @map("process_status")
+  processedAt   DateTime? @map("processed_at") @db.Timestamptz(6)
+  receivedAt    DateTime  @default(now()) @map("received_at") @db.Timestamptz(6)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, eventKey])
+  @@index([tenantId, processStatus, receivedAt])
+  @@index([tenantId, wamid])
+  @@map("webhook_events")
 }

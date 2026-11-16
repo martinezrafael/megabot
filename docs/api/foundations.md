@@ -18,6 +18,8 @@ A API valida tudo na inicialização. Se algo estiver errado, o processo **não 
 | `RATE_LIMIT_AUTH_MAX`                       | `20`                                                | Por IP, rotas de login/cadastro/reset                        |
 | `TRUST_PROXY`                               | `false`                                             | `true`, número de proxies ou `loopback`                      |
 | `SWAGGER_ENABLED`                           | `true` em dev, `false` em produção                  | Libera `/docs`                                               |
+| `WHATSAPP_APP_SECRET`                       | vazia                                               | Confere a assinatura do webhook; **obrigatória em produção** |
+| `WHATSAPP_VERIFY_TOKEN`                     | vazia                                               | Mín. 8 caracteres; **obrigatória em produção**               |
 
 Web (`apps/web`): `NEXT_PUBLIC_API_URL` (obrigatória no build e na execução em produção) e `API_URL` (opcional, rede interna).
 

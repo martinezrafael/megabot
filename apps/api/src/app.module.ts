@@ -12,6 +12,7 @@ import { createLoggerModule } from './logging/logger.module';
 import type { Mailer } from './mailer';
 import { MeModule } from './me/me.module';
 import { createThrottlerOptions } from './rate-limit';
+import { WhatsappWebhookModule } from './whatsapp/whatsapp-webhook.module';
 import type { DestinationStream } from 'pino';
 
 export interface AppModuleOptions {
@@ -38,6 +39,7 @@ export class AppModule {
         AuthModule.register(options),
         HealthModule.register({ ping: options.dbPing }),
         MeModule,
+        WhatsappWebhookModule,
       ],
       providers: [
         { provide: APP_FILTER, useClass: AllExceptionsFilter },

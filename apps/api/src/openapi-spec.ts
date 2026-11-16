@@ -17,6 +17,7 @@ const SPEC_CONFIG: AppConfig = {
   rateLimit: { windowMs: 60_000, max: 1000, authMax: 1000 },
   trustProxy: false,
   swaggerEnabled: false,
+  whatsapp: { appSecret: undefined, verifyToken: undefined },
 };
 
 /** Gera o contrato OpenAPI sem depender de .env, banco ou rede. */

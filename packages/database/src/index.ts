@@ -3,3 +3,12 @@ export { prisma } from './client';
 export { withTenant, type TenantTransactionClient } from './tenant-helper';
 export { withUser, listUserTenants, type UserTenant } from './user-helper';
 export { provisionTenantForUser, slugify, type ProvisionResult } from './provision-tenant';
+export {
+  findWhatsappConnectionByPhoneNumberId,
+  registerWhatsappConnection,
+  storeWebhookEvents,
+  type NewWebhookEvent,
+  type RegisterWhatsappConnectionInput,
+  type StoreWebhookEventsResult,
+  type WhatsappConnectionInfo,
+} from './whatsapp';

@@ -9,10 +9,12 @@
     "lint": "eslint .",
     "check-types": "tsc --noEmit",
     "test": "node --env-file=../../.env --import tsx --test --test-concurrency=1 tests/**/*.test.ts",
-    "openapi:generate": "tsx scripts/generate-openapi.ts"
+    "openapi:generate": "tsx scripts/generate-openapi.ts",
+    "webhook:anonymize": "tsx scripts/anonymize-webhook.ts"
   },
   "dependencies": {
     "@megabot/database": "workspace:*",
+    "@megabot/whatsapp": "workspace:*",
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",
     "@nestjs/platform-express": "^11.0.0",
