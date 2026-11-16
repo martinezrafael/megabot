@@ -254,6 +254,18 @@
           "updatedAt"
         ],
         "type": "object"
+      },
+      "WebhookAckDto": {
+        "properties": {
+          "status": {
+            "example": "ok",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -2701,6 +2713,135 @@
         "summary": "Usuário logado e seu tenant",
         "tags": [
           "me"
+        ]
+      }
+    },
+    "/webhooks/whatsapp": {
+      "get": {
+        "description": "A Meta chama este endereço ao cadastrar o webhook. Se `hub.verify_token` confere com `WHATSAPP_VERIFY_TOKEN`, devolve `hub.challenge` em texto puro.",
+        "operationId": "WhatsappWebhookController_verify",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "hub.challenge",
+            "required": true,
+            "schema": {
+              "example": "1158201444"
+            }
+          },
+          {
+            "in": "query",
+            "name": "hub.verify_token",
+            "required": true,
+            "schema": {}
+          },
+          {
+            "in": "query",
+            "name": "hub.mode",
+            "required": true,
+            "schema": {
+              "example": "subscribe"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "O próprio `hub.challenge`"
+          },
+          "403": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Token inválido"
+          }
+        },
+        "summary": "Verificação do webhook (handshake da Meta)",
+        "tags": [
+          "webhooks"
+        ]
+      },
+      "post": {
+        "description": "Confere `X-Hub-Signature-256`, descobre o tenant pelo `phone_number_id`, grava os eventos (idempotente por wamid) e responde 200. O processamento pesado acontece depois, no worker.",
+        "operationId": "WhatsappWebhookController_receive",
+        "parameters": [
+          {
+            "description": "`sha256=` + HMAC-SHA256 do corpo cru com o app secret da Meta",
+            "in": "header",
+            "name": "x-hub-signature-256",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "type": "object"
+              }
+            }
+          },
+          "description": "Payload do webhook da WhatsApp Cloud API (`object: whatsapp_business_account`)",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookAckDto"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Payload inválido"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Assinatura inválida"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Webhook não configurado"
+          }
+        },
+        "summary": "Recebe eventos do WhatsApp (mensagens e status)",
+        "tags": [
+          "webhooks"
         ]
       }
     }

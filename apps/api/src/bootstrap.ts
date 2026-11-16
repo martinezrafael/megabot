@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
-import { json, type NextFunction, type Request, type Response } from 'express';
+import express, { json, type NextFunction, type Request, type Response } from 'express';
 import { Logger } from 'nestjs-pino';
 import { AppModule, type AppModuleOptions } from './app.module';
 import { REQUEST_ID_HEADER, requestIdMiddleware } from './logging/request-id';
@@ -10,11 +10,23 @@ import { setupSwagger } from './openapi';
 const parseJson = json({ limit: '100kb' });
 
 /**
- * Lê o corpo JSON de todas as rotas, MENOS as de /api/auth: o Better Auth
- * precisa receber o corpo ainda "cru" (um stream que ainda não foi lido).
+ * Webhook do WhatsApp: a assinatura (X-Hub-Signature-256) é calculada sobre os BYTES exatos
+ * do corpo. Se o corpo passasse por JSON.parse antes, qualquer diferença de formatação
+ * (espaços, ordem, escape de unicode) invalidaria a conferência. Por isso guardamos o Buffer.
+ * Limite de 3 MB: é o tamanho máximo que a Meta anuncia para um webhook.
  */
-function jsonUnlessAuth(req: Request, res: Response, next: NextFunction) {
+const WHATSAPP_WEBHOOK_PATH = '/webhooks/whatsapp';
+const parseRaw = express.raw({ type: () => true, limit: '3mb' });
+
+/**
+ * Escolhe o parser de corpo por rota:
+ * - /api/auth: nenhum (o Better Auth precisa do stream ainda não lido);
+ * - /webhooks/whatsapp: corpo cru (Buffer), para conferir a assinatura;
+ * - demais: JSON.
+ */
+function bodyParserByRoute(req: Request, res: Response, next: NextFunction) {
   if (req.path.startsWith('/api/auth')) return next();
+  if (req.path === WHATSAPP_WEBHOOK_PATH) return parseRaw(req, res, next);
   return parseJson(req, res, next);
 }
 
@@ -24,7 +36,7 @@ function jsonUnlessAuth(req: Request, res: Response, next: NextFunction) {
 export async function createApp(options: AppModuleOptions): Promise<NestExpressApplication> {
   const { config } = options;
 
-  // bodyParser: false -> registramos o nosso parser logo abaixo (ver jsonUnlessAuth).
+  // bodyParser: false -> registramos o nosso parser logo abaixo (ver bodyParserByRoute).
   // bufferLogs: guarda os logs de inicialização até o pino estar pronto.
   const app = await NestFactory.create<NestExpressApplication>(AppModule.register(options), {
     bodyParser: false,
@@ -46,7 +58,7 @@ export async function createApp(options: AppModuleOptions): Promise<NestExpressA
     exposedHeaders: [REQUEST_ID_HEADER, 'retry-after'],
   });
 
-  app.use(jsonUnlessAuth);
+  app.use(bodyParserByRoute);
 
   if (config.swaggerEnabled) await setupSwagger(app, config);
 

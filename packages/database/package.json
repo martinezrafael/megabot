@@ -10,6 +10,7 @@
     "db:migrate:dev": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
+    "whatsapp:connect": "tsx --env-file=../../.env scripts/connect-whatsapp-number.ts",
     "lint": "eslint .",
     "check-types": "tsc --noEmit",
     "test": "node --env-file=../../.env --import tsx --test --test-concurrency=1 tests/**/*.test.ts"

@@ -520,6 +520,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/webhooks/whatsapp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Verificação do webhook (handshake da Meta)
+         * @description A Meta chama este endereço ao cadastrar o webhook. Se `hub.verify_token` confere com `WHATSAPP_VERIFY_TOKEN`, devolve `hub.challenge` em texto puro.
+         */
+        get: operations["WhatsappWebhookController_verify"];
+        put?: never;
+        /**
+         * Recebe eventos do WhatsApp (mensagens e status)
+         * @description Confere `X-Hub-Signature-256`, descobre o tenant pelo `phone_number_id`, grava os eventos (idempotente por wamid) e responde 200. O processamento pesado acontece depois, no worker.
+         */
+        post: operations["WhatsappWebhookController_receive"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -629,6 +653,10 @@ export interface components {
             name: string;
             /** Format: date-time */
             updatedAt: string;
+        };
+        WebhookAckDto: {
+            /** @example ok */
+            status: string;
         };
     };
     responses: never;
@@ -1795,6 +1823,95 @@ export interface operations {
             };
             /** @description Limite de requisições excedido */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+        };
+    };
+    WhatsappWebhookController_verify: {
+        parameters: {
+            query: {
+                "hub.challenge": unknown;
+                "hub.verify_token": unknown;
+                "hub.mode": unknown;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description O próprio `hub.challenge` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Token inválido */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+        };
+    };
+    WhatsappWebhookController_receive: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description `sha256=` + HMAC-SHA256 do corpo cru com o app secret da Meta */
+                "x-hub-signature-256": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Payload do webhook da WhatsApp Cloud API (`object: whatsapp_business_account`) */
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookAckDto"];
+                };
+            };
+            /** @description Payload inválido */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Assinatura inválida */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Webhook não configurado */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

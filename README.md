@@ -129,6 +129,8 @@ WEBHOOK_BASE_URL=https://abcd-123.ngrok-free.app
 
 4. Use essa URL nos painéis de webhooks das plataformas externas, apontando para o seu endpoint local (ex: `https://abcd-123.ngrok-free.app/webhooks/whatsapp`).
 
+Para o WhatsApp, o passo a passo completo (variáveis, cadastro na Meta e como ligar o seu número a um tenant) está em [docs/api/whatsapp-webhook.md](docs/api/whatsapp-webhook.md).
+
 ---
 
 ## 🛠️ Comandos Úteis

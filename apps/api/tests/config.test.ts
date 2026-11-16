@@ -108,8 +108,39 @@ describe('Configuração validada com Zod', () => {
       NODE_ENV: 'production',
       BETTER_AUTH_URL: 'https://api.exemplo.com',
       WEB_URL: 'https://app.exemplo.com',
+      WHATSAPP_APP_SECRET: 'segredo-do-app-da-meta',
+      WHATSAPP_VERIFY_TOKEN: 'token-de-verificacao',
     });
     assert.equal(config.swaggerEnabled, false);
+  });
+
+  it('webhook do WhatsApp: opcional em desenvolvimento, obrigatório em produção', () => {
+    const dev = loadConfig(VALID_ENV);
+    assert.deepEqual(dev.whatsapp, { appSecret: undefined, verifyToken: undefined });
+
+    const configured = loadConfig({
+      ...VALID_ENV,
+      WHATSAPP_APP_SECRET: 'segredo-do-app-da-meta',
+      WHATSAPP_VERIFY_TOKEN: 'token-de-verificacao',
+    });
+    assert.deepEqual(configured.whatsapp, {
+      appSecret: 'segredo-do-app-da-meta',
+      verifyToken: 'token-de-verificacao',
+    });
+
+    const issues = issuesOf({
+      ...VALID_ENV,
+      NODE_ENV: 'production',
+      BETTER_AUTH_URL: 'https://api.exemplo.com',
+      WEB_URL: 'https://app.exemplo.com',
+    });
+    assert.ok(issues.some((i) => i.startsWith('WHATSAPP_APP_SECRET')));
+    assert.ok(issues.some((i) => i.startsWith('WHATSAPP_VERIFY_TOKEN')));
+  });
+
+  it('token de verificação curto demais é recusado', () => {
+    const issues = issuesOf({ ...VALID_ENV, WHATSAPP_VERIFY_TOKEN: 'curto' });
+    assert.ok(issues.some((i) => i.startsWith('WHATSAPP_VERIFY_TOKEN')));
   });
 
   it('FALHA RÁPIDA: o processo não sobe com configuração inválida', () => {

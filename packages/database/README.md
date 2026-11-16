@@ -6,7 +6,9 @@ Schema, migrations, cliente Prisma e isolamento multitenant via Row Level Securi
 
 - `tenants`: empresas.
 - `users`: usuários.
-- `memberships`: vínculo entre usuário e tenant (`role`: `OWNER`, `ADMIN` ou `MEMBER`). **Única tabela com RLS hoje.**
+- `memberships`: vínculo entre usuário e tenant (`role`: `OWNER`, `ADMIN` ou `MEMBER`). Tem RLS.
+- `whatsapp_connections`: qual número do WhatsApp (`phone_number_id`, único no sistema) pertence a qual tenant. Tem RLS.
+- `webhook_events`: caixa de entrada dos webhooks do WhatsApp, única por `(tenant_id, event_key)`. Tem RLS.
 
 > Decisão de escopo: `tenants` e `users` não têm RLS. Qualquer sessão com acesso ao banco consegue listá-las. Ao criar tabelas que pertencem a um tenant, siga o checklist da seção "Adicionando RLS a uma nova tabela".
 
@@ -130,3 +132,18 @@ inserir a membership; sem isso o `WITH CHECK` da policy bloqueia o INSERT.
 
 `pnpm --filter @megabot/database build` gera o Prisma Client e compila `src/` para `dist/` (CommonJS), que é o
 que a API usa em runtime. Os testes e o typecheck continuam usando `src/` diretamente.
+
+---
+
+## WhatsApp: descobrindo o tenant pelo número e gravando webhooks
+
+O webhook da Meta só traz o `phone_number_id`: ainda não sabemos o tenant. Mesmo padrão da seção anterior, uma segunda policy de **só leitura**:
+
+- `whatsapp_connection_lookup_policy` libera o SELECT da conexão cujo número está em `app.phone_number_id` (função `current_app_phone_number_id()`). Dá para ler UMA linha por vez, nunca listar as de todos os tenants.
+- `findWhatsappConnectionByPhoneNumberId(phoneNumberId)` é o único ponto que usa essa policy. Devolve `{ tenantId, wabaId }` ou `null`.
+- `storeWebhookEvents(tenantId, events)` grava via `withTenant` com `createMany({ skipDuplicates: true })` (`ON CONFLICT DO NOTHING`). Devolve quantos foram inseridos e quantos eram duplicados.
+- `registerWhatsappConnection(tenantId, ...)` liga um número a um tenant. Enquanto não existe tela para isso: `pnpm db:whatsapp-connect --tenant <uuid> --phone-number-id <id> --waba-id <id>`.
+
+**Chave de idempotência (`event_key`):** `message:<wamid>`, `status:<wamid>:<status>` (o mesmo wamid recebe sent, delivered e read) ou `error:<uuid>` (erros de sistema não têm id). **Ordem real:** use `event_at` (hora da Meta); `received_at` é só a ordem de chegada.
+
+Testes: `tests/integration/whatsapp-webhook.test.ts`. Rollback: `prisma/migrations/20261115150000_whatsapp_webhook/rollback.sql` (rode **antes** dos rollbacks das migrations anteriores).

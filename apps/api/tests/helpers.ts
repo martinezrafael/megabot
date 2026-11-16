@@ -57,6 +57,7 @@ export function createTestConfig(port: number, overrides: Partial<AppConfig> = {
     rateLimit: { windowMs: 60_000, max: 10_000, authMax: 10_000 },
     trustProxy: false,
     swaggerEnabled: false,
+    whatsapp: { appSecret: undefined, verifyToken: undefined },
     ...overrides,
   };
 }

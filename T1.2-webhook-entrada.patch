@@ -1,0 +1,3010 @@
+diff --git a/.env.example b/.env.example
+index a0af0a4..5bd7365 100644
+--- a/.env.example
++++ b/.env.example
+@@ -54,6 +54,15 @@ TRUST_PROXY=false
+ # Webhooks / Local Tunnel (ngrok / localtunnel)
+ WEBHOOK_BASE_URL=https://seu-subdominio.ngrok-free.app
+ 
++# WhatsApp Cloud API (webhook de entrada: POST/GET /webhooks/whatsapp)
++# WHATSAPP_APP_SECRET: "Segredo do app" em Meta for Developers > Configurações do app > Básico.
++#   Serve para conferir a assinatura (X-Hub-Signature-256) de cada webhook. Sem ele o POST responde 503.
++# WHATSAPP_VERIFY_TOKEN: texto QUE VOCÊ INVENTA (mín. 8 caracteres; ex.: openssl rand -hex 16).
++#   Cole o mesmo valor no campo "Verificar token" ao cadastrar o webhook na Meta. Sem ele o GET responde 403.
++# Ambos são obrigatórios em produção.
++WHATSAPP_APP_SECRET=
++WHATSAPP_VERIFY_TOKEN=
++
+ # API Keys & Third-party Services (Preencha com suas chaves de dev)
+ OPENAI_API_KEY=sk-proj-xxxxxxxxxxxxxxxxxxxxxxxx
+ WHATSAPP_API_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxx
+\ No newline at end of file
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index bb3d0e2..df573c3 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -84,6 +84,15 @@ jobs:
+         run: pnpm test
+ 
+       # Os rollbacks devem ser aplicados na ORDEM INVERSA das migrations.
++      - name: Verify WhatsApp webhook migration rollback
++        run: |
++          psql "$APP_PG_URL" -v ON_ERROR_STOP=1 \
++            -f packages/database/prisma/migrations/20261115150000_whatsapp_webhook/rollback.sql
++          TABLES=$(psql "$APP_PG_URL" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_name IN ('whatsapp_connections','webhook_events')")
++          FUNC=$(psql "$APP_PG_URL" -tAc "SELECT count(*) FROM pg_proc WHERE proname = 'current_app_phone_number_id'")
++          test "$TABLES" = "0"
++          test "$FUNC" = "0"
++
+       - name: Verify auth migrations rollback
+         run: |
+           psql "$APP_PG_URL" -v ON_ERROR_STOP=1 \
+diff --git a/README.md b/README.md
+index ffd2c92..ac9ca62 100644
+--- a/README.md
++++ b/README.md
+@@ -129,6 +129,8 @@ WEBHOOK_BASE_URL=https://abcd-123.ngrok-free.app
+ 
+ 4. Use essa URL nos painéis de webhooks das plataformas externas, apontando para o seu endpoint local (ex: `https://abcd-123.ngrok-free.app/webhooks/whatsapp`).
+ 
++Para o WhatsApp, o passo a passo completo (variáveis, cadastro na Meta e como ligar o seu número a um tenant) está em [docs/api/whatsapp-webhook.md](docs/api/whatsapp-webhook.md).
++
+ ---
+ 
+ ## 🛠️ Comandos Úteis
+diff --git a/apps/api/openapi.json b/apps/api/openapi.json
+index a7ed5d9..1183e32 100644
+--- a/apps/api/openapi.json
++++ b/apps/api/openapi.json
+@@ -254,6 +254,18 @@
+           "updatedAt"
+         ],
+         "type": "object"
++      },
++      "WebhookAckDto": {
++        "properties": {
++          "status": {
++            "example": "ok",
++            "type": "string"
++          }
++        },
++        "required": [
++          "status"
++        ],
++        "type": "object"
+       }
+     },
+     "securitySchemes": {
+@@ -2703,6 +2715,135 @@
+           "me"
+         ]
+       }
++    },
++    "/webhooks/whatsapp": {
++      "get": {
++        "description": "A Meta chama este endereço ao cadastrar o webhook. Se `hub.verify_token` confere com `WHATSAPP_VERIFY_TOKEN`, devolve `hub.challenge` em texto puro.",
++        "operationId": "WhatsappWebhookController_verify",
++        "parameters": [
++          {
++            "in": "query",
++            "name": "hub.challenge",
++            "required": true,
++            "schema": {
++              "example": "1158201444"
++            }
++          },
++          {
++            "in": "query",
++            "name": "hub.verify_token",
++            "required": true,
++            "schema": {}
++          },
++          {
++            "in": "query",
++            "name": "hub.mode",
++            "required": true,
++            "schema": {
++              "example": "subscribe"
++            }
++          }
++        ],
++        "responses": {
++          "200": {
++            "content": {
++              "text/plain": {
++                "schema": {
++                  "type": "string"
++                }
++              }
++            },
++            "description": "O próprio `hub.challenge`"
++          },
++          "403": {
++            "content": {
++              "text/plain": {
++                "schema": {
++                  "$ref": "#/components/schemas/ErrorResponseDto"
++                }
++              }
++            },
++            "description": "Token inválido"
++          }
++        },
++        "summary": "Verificação do webhook (handshake da Meta)",
++        "tags": [
++          "webhooks"
++        ]
++      },
++      "post": {
++        "description": "Confere `X-Hub-Signature-256`, descobre o tenant pelo `phone_number_id`, grava os eventos (idempotente por wamid) e responde 200. O processamento pesado acontece depois, no worker.",
++        "operationId": "WhatsappWebhookController_receive",
++        "parameters": [
++          {
++            "description": "`sha256=` + HMAC-SHA256 do corpo cru com o app secret da Meta",
++            "in": "header",
++            "name": "x-hub-signature-256",
++            "required": true,
++            "schema": {
++              "type": "string"
++            }
++          }
++        ],
++        "requestBody": {
++          "content": {
++            "application/json": {
++              "schema": {
++                "additionalProperties": true,
++                "type": "object"
++              }
++            }
++          },
++          "description": "Payload do webhook da WhatsApp Cloud API (`object: whatsapp_business_account`)",
++          "required": true
++        },
++        "responses": {
++          "200": {
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/WebhookAckDto"
++                }
++              }
++            },
++            "description": ""
++          },
++          "400": {
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/ErrorResponseDto"
++                }
++              }
++            },
++            "description": "Payload inválido"
++          },
++          "401": {
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/ErrorResponseDto"
++                }
++              }
++            },
++            "description": "Assinatura inválida"
++          },
++          "503": {
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/ErrorResponseDto"
++                }
++              }
++            },
++            "description": "Webhook não configurado"
++          }
++        },
++        "summary": "Recebe eventos do WhatsApp (mensagens e status)",
++        "tags": [
++          "webhooks"
++        ]
++      }
+     }
+   },
+   "servers": [],
+diff --git a/apps/api/package.json b/apps/api/package.json
+index 0202c99..d2a5d84 100644
+--- a/apps/api/package.json
++++ b/apps/api/package.json
+@@ -9,10 +9,12 @@
+     "lint": "eslint .",
+     "check-types": "tsc --noEmit",
+     "test": "node --env-file=../../.env --import tsx --test --test-concurrency=1 tests/**/*.test.ts",
+-    "openapi:generate": "tsx scripts/generate-openapi.ts"
++    "openapi:generate": "tsx scripts/generate-openapi.ts",
++    "webhook:anonymize": "tsx scripts/anonymize-webhook.ts"
+   },
+   "dependencies": {
+     "@megabot/database": "workspace:*",
++    "@megabot/whatsapp": "workspace:*",
+     "@nestjs/common": "^11.0.0",
+     "@nestjs/core": "^11.0.0",
+     "@nestjs/platform-express": "^11.0.0",
+diff --git a/apps/api/scripts/anonymize-webhook.ts b/apps/api/scripts/anonymize-webhook.ts
+new file mode 100644
+index 0000000..1b045d2
+--- /dev/null
++++ b/apps/api/scripts/anonymize-webhook.ts
+@@ -0,0 +1,91 @@
++/**
++ * Anonimiza um payload REAL de webhook da Meta para virar fixture de teste.
++ *
++ * Uso: pnpm --filter @megabot/api webhook:anonymize <entrada.json> [saida.json]
++ *
++ * O mapeamento é determinístico dentro do arquivo: o mesmo telefone/wamid real vira sempre o
++ * mesmo valor falso, então as referências entre eventos (status -> mensagem, resposta -> citada)
++ * continuam coerentes. SEMPRE revise a saída antes de commitar.
++ */
++import { readFileSync, writeFileSync } from 'node:fs';
++
++const PHONE_KEYS = new Set(['wa_id', 'from', 'recipient_id', 'phone']);
++const OPAQUE_USER_KEYS = new Set([
++  'user_id',
++  'from_user_id',
++  'recipient_user_id',
++  'parent_user_id',
++]);
++const NAME_KEYS = new Set(['formatted_name', 'first_name', 'last_name', 'middle_name']);
++
++class Aliaser {
++  private readonly seen = new Map<string, string>();
++  constructor(private readonly make: (n: number) => string) {}
++  get(real: string): string {
++    let alias = this.seen.get(real);
++    if (!alias) {
++      alias = this.make(this.seen.size + 1);
++      this.seen.set(real, alias);
++    }
++    return alias;
++  }
++}
++
++export function anonymizeWebhook<T>(payload: T): T {
++  const phones = new Aliaser((n) => `5511900000${String(n).padStart(3, '0')}`);
++  const users = new Aliaser((n) => `BR.ANON${String(n).padStart(4, '0')}`);
++  const names = new Aliaser((n) => `Cliente Anonimo ${n}`);
++  const wamids = new Aliaser((n) => `wamid.ANON${String(n).padStart(6, '0')}`);
++  const media = new Aliaser((n) => `MEDIA-ANON-${n}`);
++  const business = new Aliaser((n) => `10000000000000${n}`);
++
++  const visit = (node: unknown, key: string, parentKey: string): unknown => {
++    if (Array.isArray(node)) return node.map((item) => visit(item, key, parentKey));
++    if (node && typeof node === 'object') {
++      return Object.fromEntries(Object.entries(node).map(([k, v]) => [k, visit(v, k, key)]));
++    }
++    if (typeof node === 'string') {
++      if (node.startsWith('wamid.')) return wamids.get(node);
++      if (PHONE_KEYS.has(key)) return phones.get(node);
++      if (OPAQUE_USER_KEYS.has(key)) return users.get(node);
++      if (key === 'display_phone_number') return '551100000000';
++      if (key === 'phone_number_id' || (key === 'id' && parentKey === 'entry')) {
++        return business.get(node);
++      }
++      if (NAME_KEYS.has(key) || (key === 'name' && ['profile', 'name'].includes(parentKey))) {
++        return names.get(node);
++      }
++      if (key === 'body' && parentKey === 'text') return 'Texto anonimizado';
++      if (key === 'caption') return 'Legenda anonimizada';
++      if (key === 'address' || (key === 'name' && parentKey === 'location'))
++        return 'Endereco anonimizado';
++      if (key === 'url' || key === 'source_url' || key === 'link')
++        return 'https://exemplo.invalid/anonimizado';
++      if (key === 'filename') return 'arquivo-anonimizado.pdf';
++      if (key === 'id' && ['image', 'audio', 'video', 'document', 'sticker'].includes(parentKey)) {
++        return media.get(node);
++      }
++    }
++    if (typeof node === 'number' && (key === 'latitude' || key === 'longitude')) {
++      return key === 'latitude' ? -23.55 : -46.63;
++    }
++    return node;
++  };
++
++  return visit(payload, '', '') as T;
++}
++
++if (require.main === module) {
++  const [input, output] = process.argv.slice(2);
++  if (!input) {
++    console.error('Uso: pnpm --filter @megabot/api webhook:anonymize <entrada.json> [saida.json]');
++    process.exit(1);
++  }
++  const result = `${JSON.stringify(anonymizeWebhook(JSON.parse(readFileSync(input, 'utf8'))), null, 2)}\n`;
++  if (output) {
++    writeFileSync(output, result);
++    console.info(`Anonimizado em ${output}. REVISE o arquivo antes de commitar.`);
++  } else {
++    process.stdout.write(result);
++  }
++}
+diff --git a/apps/api/src/app.module.ts b/apps/api/src/app.module.ts
+index c8a2737..7b98376 100644
+--- a/apps/api/src/app.module.ts
++++ b/apps/api/src/app.module.ts
+@@ -12,6 +12,7 @@ import { createLoggerModule } from './logging/logger.module';
+ import type { Mailer } from './mailer';
+ import { MeModule } from './me/me.module';
+ import { createThrottlerOptions } from './rate-limit';
++import { WhatsappWebhookModule } from './whatsapp/whatsapp-webhook.module';
+ import type { DestinationStream } from 'pino';
+ 
+ export interface AppModuleOptions {
+@@ -38,6 +39,7 @@ export class AppModule {
+         AuthModule.register(options),
+         HealthModule.register({ ping: options.dbPing }),
+         MeModule,
++        WhatsappWebhookModule,
+       ],
+       providers: [
+         { provide: APP_FILTER, useClass: AllExceptionsFilter },
+diff --git a/apps/api/src/bootstrap.ts b/apps/api/src/bootstrap.ts
+index 7ff928b..e19a927 100644
+--- a/apps/api/src/bootstrap.ts
++++ b/apps/api/src/bootstrap.ts
+@@ -1,7 +1,7 @@
+ import 'reflect-metadata';
+ import { NestFactory } from '@nestjs/core';
+ import type { NestExpressApplication } from '@nestjs/platform-express';
+-import { json, type NextFunction, type Request, type Response } from 'express';
++import express, { json, type NextFunction, type Request, type Response } from 'express';
+ import { Logger } from 'nestjs-pino';
+ import { AppModule, type AppModuleOptions } from './app.module';
+ import { REQUEST_ID_HEADER, requestIdMiddleware } from './logging/request-id';
+@@ -10,11 +10,23 @@ import { setupSwagger } from './openapi';
+ const parseJson = json({ limit: '100kb' });
+ 
+ /**
+- * Lê o corpo JSON de todas as rotas, MENOS as de /api/auth: o Better Auth
+- * precisa receber o corpo ainda "cru" (um stream que ainda não foi lido).
++ * Webhook do WhatsApp: a assinatura (X-Hub-Signature-256) é calculada sobre os BYTES exatos
++ * do corpo. Se o corpo passasse por JSON.parse antes, qualquer diferença de formatação
++ * (espaços, ordem, escape de unicode) invalidaria a conferência. Por isso guardamos o Buffer.
++ * Limite de 3 MB: é o tamanho máximo que a Meta anuncia para um webhook.
+  */
+-function jsonUnlessAuth(req: Request, res: Response, next: NextFunction) {
++const WHATSAPP_WEBHOOK_PATH = '/webhooks/whatsapp';
++const parseRaw = express.raw({ type: () => true, limit: '3mb' });
++
++/**
++ * Escolhe o parser de corpo por rota:
++ * - /api/auth: nenhum (o Better Auth precisa do stream ainda não lido);
++ * - /webhooks/whatsapp: corpo cru (Buffer), para conferir a assinatura;
++ * - demais: JSON.
++ */
++function bodyParserByRoute(req: Request, res: Response, next: NextFunction) {
+   if (req.path.startsWith('/api/auth')) return next();
++  if (req.path === WHATSAPP_WEBHOOK_PATH) return parseRaw(req, res, next);
+   return parseJson(req, res, next);
+ }
+ 
+@@ -24,7 +36,7 @@ function jsonUnlessAuth(req: Request, res: Response, next: NextFunction) {
+ export async function createApp(options: AppModuleOptions): Promise<NestExpressApplication> {
+   const { config } = options;
+ 
+-  // bodyParser: false -> registramos o nosso parser logo abaixo (ver jsonUnlessAuth).
++  // bodyParser: false -> registramos o nosso parser logo abaixo (ver bodyParserByRoute).
+   // bufferLogs: guarda os logs de inicialização até o pino estar pronto.
+   const app = await NestFactory.create<NestExpressApplication>(AppModule.register(options), {
+     bodyParser: false,
+@@ -46,7 +58,7 @@ export async function createApp(options: AppModuleOptions): Promise<NestExpressA
+     exposedHeaders: [REQUEST_ID_HEADER, 'retry-after'],
+   });
+ 
+-  app.use(jsonUnlessAuth);
++  app.use(bodyParserByRoute);
+ 
+   if (config.swaggerEnabled) await setupSwagger(app, config);
+ 
+diff --git a/apps/api/src/config.ts b/apps/api/src/config.ts
+index 6096919..0592de4 100644
+--- a/apps/api/src/config.ts
++++ b/apps/api/src/config.ts
+@@ -33,6 +33,11 @@ export interface AppConfig {
+   trustProxy: boolean | number | string;
+   /** Expõe a documentação interativa em /docs. Desligada por padrão em produção. */
+   swaggerEnabled: boolean;
++  /**
++   * Webhook do WhatsApp (app da Meta). Sem `appSecret` o POST responde 503; sem `verifyToken`
++   * o GET de verificação responde 403. Em produção os dois são obrigatórios.
++   */
++  whatsapp: { appSecret: string | undefined; verifyToken: string | undefined };
+ }
+ 
+ /** Erro lançado quando a configuração é inválida. A mensagem já vem formatada para o terminal. */
+@@ -84,6 +89,9 @@ const envSchema = z
+     TRUST_PROXY: z.string().default('false'),
+ 
+     SWAGGER_ENABLED: z.enum(['true', 'false']).optional(),
++
++    WHATSAPP_APP_SECRET: z.string().optional(),
++    WHATSAPP_VERIFY_TOKEN: z.string().min(8, 'precisa ter pelo menos 8 caracteres').optional(),
+   })
+   .superRefine((env, ctx) => {
+     if (Boolean(env.GOOGLE_CLIENT_ID) !== Boolean(env.GOOGLE_CLIENT_SECRET)) {
+@@ -96,7 +104,12 @@ const envSchema = z
+     }
+     // Em produção não aceitamos "adivinhar" endereços: tudo explícito.
+     if (env.NODE_ENV === 'production') {
+-      for (const key of ['BETTER_AUTH_URL', 'WEB_URL'] as const) {
++      for (const key of [
++        'BETTER_AUTH_URL',
++        'WEB_URL',
++        'WHATSAPP_APP_SECRET',
++        'WHATSAPP_VERIFY_TOKEN',
++      ] as const) {
+         if (!env[key]) {
+           ctx.addIssue({ code: 'custom', path: [key], message: 'obrigatória em produção' });
+         }
+@@ -157,5 +170,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
+     },
+     trustProxy: parseTrustProxy(e.TRUST_PROXY),
+     swaggerEnabled: e.SWAGGER_ENABLED ? e.SWAGGER_ENABLED === 'true' : e.NODE_ENV !== 'production',
++    whatsapp: { appSecret: e.WHATSAPP_APP_SECRET, verifyToken: e.WHATSAPP_VERIFY_TOKEN },
+   };
+ }
+diff --git a/apps/api/src/openapi-spec.ts b/apps/api/src/openapi-spec.ts
+index 582206f..a8fdfce 100644
+--- a/apps/api/src/openapi-spec.ts
++++ b/apps/api/src/openapi-spec.ts
+@@ -17,6 +17,7 @@ const SPEC_CONFIG: AppConfig = {
+   rateLimit: { windowMs: 60_000, max: 1000, authMax: 1000 },
+   trustProxy: false,
+   swaggerEnabled: false,
++  whatsapp: { appSecret: undefined, verifyToken: undefined },
+ };
+ 
+ /** Gera o contrato OpenAPI sem depender de .env, banco ou rede. */
+diff --git a/apps/api/src/whatsapp/log-metrics.ts b/apps/api/src/whatsapp/log-metrics.ts
+new file mode 100644
+index 0000000..4ee17af
+--- /dev/null
++++ b/apps/api/src/whatsapp/log-metrics.ts
+@@ -0,0 +1,44 @@
++import type { WhatsAppLogger, WhatsAppMetrics } from '@megabot/whatsapp';
++import type { PinoLogger } from 'nestjs-pino';
++
++/** Adapta o PinoLogger (do Nest) ao contrato de log do pacote @megabot/whatsapp. */
++export function toWhatsAppLogger(logger: PinoLogger): WhatsAppLogger {
++  return {
++    debug: (fields, message) => logger.debug(fields, message),
++    info: (fields, message) => logger.info(fields, message),
++    warn: (fields, message) => logger.warn(fields, message),
++    error: (fields, message) => logger.error(fields, message),
++  };
++}
++
++/**
++ * Métricas como linhas de log estruturadas (`event: "metric"`).
++ *
++ * Ainda não temos Prometheus/OpenTelemetry: este adaptador deixa as métricas consultáveis
++ * no mesmo pipeline dos logs, com `tenant_id`. Quando houver um coletor, basta trocar esta
++ * função por outra que implemente `WhatsAppMetrics` (increment/timing), sem mexer no resto.
++ */
++export function createLogMetrics(logger: PinoLogger): WhatsAppMetrics {
++  return {
++    increment: (name, labels, value = 1) =>
++      logger.info({ event: 'metric', metric: name, metric_type: 'counter', value, ...labels }),
++    timing: (name, milliseconds, labels) =>
++      logger.info({
++        event: 'metric',
++        metric: name,
++        metric_type: 'timing_ms',
++        value: milliseconds,
++        ...labels,
++      }),
++  };
++}
++
++/** Nomes das métricas do webhook de entrada. */
++export const WEBHOOK_METRIC = {
++  requests: 'whatsapp_webhook_requests_total',
++  eventsReceived: 'whatsapp_webhook_events_received_total',
++  eventsStored: 'whatsapp_webhook_events_stored_total',
++  eventsDuplicate: 'whatsapp_webhook_events_duplicate_total',
++  unknownNumber: 'whatsapp_webhook_unknown_number_total',
++  duration: 'whatsapp_webhook_duration_ms',
++} as const;
+diff --git a/apps/api/src/whatsapp/webhook-events.mapper.ts b/apps/api/src/whatsapp/webhook-events.mapper.ts
+new file mode 100644
+index 0000000..105c1a7
+--- /dev/null
++++ b/apps/api/src/whatsapp/webhook-events.mapper.ts
+@@ -0,0 +1,58 @@
++import { randomUUID } from 'node:crypto';
++import type { NewWebhookEvent } from '@megabot/database';
++import type { WebhookEvent } from '@megabot/whatsapp';
++
++/**
++ * Converte um evento já interpretado (pacote @megabot/whatsapp) na linha de `webhook_events`.
++ *
++ * A CHAVE DE IDEMPOTÊNCIA (`eventKey`) decide o que é "o mesmo evento":
++ * - mensagem recebida: `message:<wamid>`. Cada mensagem tem um wamid único.
++ * - status de envio:   `status:<wamid>:<status>`. O MESMO wamid recebe vários status
++ *                      (sent, delivered, read), então o status entra na chave.
++ * - erro de sistema:   não tem identificador; cada um é gravado (chave aleatória).
++ */
++export function toNewWebhookEvent(event: WebhookEvent, now: Date = new Date()): NewWebhookEvent {
++  // Datas viram texto ISO e o resultado é JSON puro (é o que o Postgres guarda em jsonb).
++  const payload = JSON.parse(JSON.stringify(event)) as NewWebhookEvent['payload'];
++
++  switch (event.kind) {
++    case 'message':
++      return {
++        eventKey: `message:${event.id}`,
++        kind: 'message',
++        phoneNumberId: event.phoneNumberId,
++        wamid: event.id,
++        eventAt: event.timestamp,
++        payload,
++      };
++    case 'status':
++      return {
++        eventKey: `status:${event.messageId}:${event.status}`,
++        kind: 'status',
++        phoneNumberId: event.phoneNumberId,
++        wamid: event.messageId,
++        status: event.status,
++        eventAt: event.timestamp,
++        payload,
++      };
++    case 'error':
++      return {
++        eventKey: `error:${randomUUID()}`,
++        kind: 'error',
++        phoneNumberId: event.phoneNumberId,
++        eventAt: now,
++        payload,
++      };
++  }
++}
++
++/** Agrupa os eventos pelo número de WhatsApp da empresa (cada número pertence a um tenant). */
++export function groupByPhoneNumber(events: WebhookEvent[]): Map<string, WebhookEvent[]> {
++  const groups = new Map<string, WebhookEvent[]>();
++  for (const event of events) {
++    const group = groups.get(event.phoneNumberId);
++    if (group) group.push(event);
++    else groups.set(event.phoneNumberId, [event]);
++  }
++  return groups;
++}
+diff --git a/apps/api/src/whatsapp/whatsapp-webhook.controller.ts b/apps/api/src/whatsapp/whatsapp-webhook.controller.ts
+new file mode 100644
+index 0000000..ca0029c
+--- /dev/null
++++ b/apps/api/src/whatsapp/whatsapp-webhook.controller.ts
+@@ -0,0 +1,94 @@
++import {
++  Controller,
++  ForbiddenException,
++  Get,
++  Header,
++  Headers,
++  HttpCode,
++  Inject,
++  Post,
++  Query,
++  Req,
++} from '@nestjs/common';
++import {
++  ApiBody,
++  ApiHeader,
++  ApiOkResponse,
++  ApiOperation,
++  ApiProduces,
++  ApiQuery,
++  ApiResponse,
++  ApiTags,
++} from '@nestjs/swagger';
++import { SkipThrottle } from '@nestjs/throttler';
++import type { Request } from 'express';
++import { Public } from '../auth/public.decorator';
++import { ErrorResponseDto } from '../common/error-response.dto';
++import { WebhookAckDto } from './whatsapp-webhook.dto';
++import { WhatsappWebhookService } from './whatsapp-webhook.service';
++
++/**
++ * Porta de entrada dos webhooks da WhatsApp Cloud API.
++ *
++ * - @Public: a Meta não tem sessão; a autenticidade vem da assinatura (POST) e do token (GET).
++ * - @SkipThrottle: o limite por IP é para usuários. A Meta pode mandar rajadas legítimas de poucos
++ *   IPs; quem não assina corretamente é recusado em microssegundos (HMAC) e o corpo é limitado a 3 MB.
++ */
++@ApiTags('webhooks')
++@Public()
++@SkipThrottle()
++@Controller('webhooks/whatsapp')
++export class WhatsappWebhookController {
++  constructor(@Inject(WhatsappWebhookService) private readonly service: WhatsappWebhookService) {}
++
++  @Get()
++  @Header('Content-Type', 'text/plain; charset=utf-8')
++  @ApiOperation({
++    summary: 'Verificação do webhook (handshake da Meta)',
++    description:
++      'A Meta chama este endereço ao cadastrar o webhook. Se `hub.verify_token` confere com ' +
++      '`WHATSAPP_VERIFY_TOKEN`, devolve `hub.challenge` em texto puro.',
++  })
++  @ApiQuery({ name: 'hub.mode', required: true, example: 'subscribe' })
++  @ApiQuery({ name: 'hub.verify_token', required: true })
++  @ApiQuery({ name: 'hub.challenge', required: true, example: '1158201444' })
++  @ApiProduces('text/plain')
++  @ApiOkResponse({ description: 'O próprio `hub.challenge`', schema: { type: 'string' } })
++  @ApiResponse({ status: 403, type: ErrorResponseDto, description: 'Token inválido' })
++  verify(@Query() query: Record<string, unknown>): string {
++    const challenge = this.service.verifyChallenge(query);
++    if (challenge === null) throw new ForbiddenException('Token de verificação inválido.');
++    return challenge;
++  }
++
++  @Post()
++  @HttpCode(200)
++  @ApiOperation({
++    summary: 'Recebe eventos do WhatsApp (mensagens e status)',
++    description:
++      'Confere `X-Hub-Signature-256`, descobre o tenant pelo `phone_number_id`, grava os eventos ' +
++      '(idempotente por wamid) e responde 200. O processamento pesado acontece depois, no worker.',
++  })
++  @ApiHeader({
++    name: 'x-hub-signature-256',
++    required: true,
++    description: '`sha256=` + HMAC-SHA256 do corpo cru com o app secret da Meta',
++  })
++  @ApiBody({
++    description: 'Payload do webhook da WhatsApp Cloud API (`object: whatsapp_business_account`)',
++    schema: { type: 'object', additionalProperties: true },
++  })
++  @ApiOkResponse({ type: WebhookAckDto })
++  @ApiResponse({ status: 400, type: ErrorResponseDto, description: 'Payload inválido' })
++  @ApiResponse({ status: 401, type: ErrorResponseDto, description: 'Assinatura inválida' })
++  @ApiResponse({ status: 503, type: ErrorResponseDto, description: 'Webhook não configurado' })
++  async receive(
++    @Req() request: Request,
++    @Headers('x-hub-signature-256') signature?: string,
++  ): Promise<WebhookAckDto> {
++    // O bootstrap entrega o corpo CRU (Buffer) nesta rota; sem corpo, o body-parser deixa vazio.
++    const rawBody = Buffer.isBuffer(request.body) ? request.body : Buffer.alloc(0);
++    await this.service.handle(rawBody, signature);
++    return { status: 'ok' };
++  }
++}
+diff --git a/apps/api/src/whatsapp/whatsapp-webhook.dto.ts b/apps/api/src/whatsapp/whatsapp-webhook.dto.ts
+new file mode 100644
+index 0000000..cff47d1
+--- /dev/null
++++ b/apps/api/src/whatsapp/whatsapp-webhook.dto.ts
+@@ -0,0 +1,6 @@
++import { ApiProperty } from '@nestjs/swagger';
++
++export class WebhookAckDto {
++  @ApiProperty({ type: String, example: 'ok' })
++  status!: string;
++}
+diff --git a/apps/api/src/whatsapp/whatsapp-webhook.module.ts b/apps/api/src/whatsapp/whatsapp-webhook.module.ts
+new file mode 100644
+index 0000000..90a854e
+--- /dev/null
++++ b/apps/api/src/whatsapp/whatsapp-webhook.module.ts
+@@ -0,0 +1,9 @@
++import { Module } from '@nestjs/common';
++import { WhatsappWebhookController } from './whatsapp-webhook.controller';
++import { WhatsappWebhookService } from './whatsapp-webhook.service';
++
++@Module({
++  controllers: [WhatsappWebhookController],
++  providers: [WhatsappWebhookService],
++})
++export class WhatsappWebhookModule {}
+diff --git a/apps/api/src/whatsapp/whatsapp-webhook.service.ts b/apps/api/src/whatsapp/whatsapp-webhook.service.ts
+new file mode 100644
+index 0000000..cbec300
+--- /dev/null
++++ b/apps/api/src/whatsapp/whatsapp-webhook.service.ts
+@@ -0,0 +1,191 @@
++import {
++  BadRequestException,
++  Inject,
++  Injectable,
++  ServiceUnavailableException,
++  UnauthorizedException,
++} from '@nestjs/common';
++import { findWhatsappConnectionByPhoneNumberId, storeWebhookEvents } from '@megabot/database';
++import {
++  WebhookPayloadError,
++  parseWebhook,
++  verifyWebhookChallenge,
++  verifyWebhookSignature,
++  type WebhookEvent,
++  type WhatsAppMetrics,
++} from '@megabot/whatsapp';
++import { PinoLogger } from 'nestjs-pino';
++import type { AppConfig } from '../config';
++import { APP_CONFIG } from '../config.tokens';
++import { WEBHOOK_METRIC, createLogMetrics, toWhatsAppLogger } from './log-metrics';
++import { groupByPhoneNumber, toNewWebhookEvent } from './webhook-events.mapper';
++
++/** O `challenge` da Meta é um número; aceitamos só caracteres seguros para ecoá-lo. */
++const SAFE_CHALLENGE = /^[A-Za-z0-9_-]{1,256}$/;
++
++export interface WebhookSummary {
++  events: number;
++  stored: number;
++  duplicates: number;
++  /** Eventos de números que não estão ligados a nenhum tenant (descartados). */
++  unknownNumberEvents: number;
++  invalidItems: number;
++}
++
++@Injectable()
++export class WhatsappWebhookService {
++  private readonly metrics: WhatsAppMetrics;
++
++  constructor(
++    @Inject(APP_CONFIG) private readonly config: AppConfig,
++    @Inject(PinoLogger) private readonly logger: PinoLogger,
++  ) {
++    this.metrics = createLogMetrics(logger);
++  }
++
++  /** GET de verificação: devolve o challenge se o token confere, senão null (-> 403). */
++  verifyChallenge(query: Record<string, unknown>): string | null {
++    const { verifyToken } = this.config.whatsapp;
++    if (!verifyToken) return null;
++    const text = (key: string) =>
++      typeof query[key] === 'string' ? (query[key] as string) : undefined;
++
++    const challenge = verifyWebhookChallenge(
++      {
++        'hub.mode': text('hub.mode'),
++        'hub.verify_token': text('hub.verify_token'),
++        'hub.challenge': text('hub.challenge'),
++      },
++      verifyToken,
++    );
++    return challenge !== null && SAFE_CHALLENGE.test(challenge) ? challenge : null;
++  }
++
++  /**
++   * POST: confere a assinatura, interpreta, descobre o tenant de cada número e grava.
++   * Só devolve quando os eventos estão no banco; qualquer processamento pesado fica para o worker.
++   */
++  async handle(rawBody: Buffer, signature: string | undefined): Promise<WebhookSummary> {
++    const started = performance.now();
++    const outcome = (name: 'ok' | 'invalid_signature' | 'invalid_payload' | 'not_configured') => {
++      this.metrics.increment(WEBHOOK_METRIC.requests, { outcome: name });
++      this.metrics.timing(WEBHOOK_METRIC.duration, Math.round(performance.now() - started), {
++        outcome: name,
++      });
++    };
++
++    const { appSecret } = this.config.whatsapp;
++    if (!appSecret) {
++      outcome('not_configured');
++      this.logger.error(
++        { event: 'whatsapp.webhook.not_configured' },
++        'WHATSAPP_APP_SECRET não configurado: webhook recusado',
++      );
++      throw new ServiceUnavailableException('Webhook do WhatsApp não configurado.');
++    }
++
++    // 1) Autenticidade: HMAC do corpo cru com o app secret. Antes de QUALQUER outra coisa.
++    if (!verifyWebhookSignature(rawBody, signature, appSecret)) {
++      outcome('invalid_signature');
++      this.logger.warn(
++        { event: 'whatsapp.webhook.invalid_signature', has_signature: Boolean(signature) },
++        'Assinatura do webhook inválida',
++      );
++      throw new UnauthorizedException('Assinatura inválida.');
++    }
++
++    // 2) Interpretação. Assinatura válida mas corpo estranho = erro do remetente (400).
++    let parsed;
++    try {
++      parsed = parseWebhook(JSON.parse(rawBody.toString('utf8')), {
++        logger: toWhatsAppLogger(this.logger),
++      });
++    } catch (error) {
++      outcome('invalid_payload');
++      const reason = error instanceof WebhookPayloadError ? error.message : 'corpo não é JSON';
++      this.logger.warn({ event: 'whatsapp.webhook.invalid_payload', reason }, 'Payload inválido');
++      throw new BadRequestException('Payload de webhook inválido.');
++    }
++
++    // 3) Tenant por número + gravação idempotente (um grupo por número).
++    const groups = groupByPhoneNumber(parsed.events);
++    const results = await Promise.all(
++      [...groups.entries()].map(([phoneNumberId, events]) =>
++        this.storeGroup(phoneNumberId, events),
++      ),
++    );
++
++    const summary: WebhookSummary = {
++      events: parsed.events.length,
++      stored: results.reduce((sum, r) => sum + r.inserted, 0),
++      duplicates: results.reduce((sum, r) => sum + r.duplicates, 0),
++      unknownNumberEvents: results.reduce((sum, r) => sum + r.unknown, 0),
++      invalidItems: parsed.invalid.length,
++    };
++
++    // Com um único tenant no lote (o normal), o log "request completed" também sai com tenant_id.
++    const tenants = [...new Set(results.flatMap((r) => (r.tenantId ? [r.tenantId] : [])))];
++    if (tenants.length === 1) {
++      try {
++        this.logger.assign({ tenant_id: tenants[0] });
++      } catch {
++        // Fora de uma requisição: o log é secundário.
++      }
++    }
++
++    outcome('ok');
++    this.logger.info(
++      { event: 'whatsapp.webhook.handled', ...summary, tenants: tenants.length },
++      'Webhook do WhatsApp processado',
++    );
++    return summary;
++  }
++
++  private async storeGroup(phoneNumberId: string, events: WebhookEvent[]) {
++    const connection = await findWhatsappConnectionByPhoneNumberId(phoneNumberId);
++
++    if (!connection) {
++      // Número que não é de nenhum tenant (desconectado ou ainda não cadastrado). Responder
++      // erro só faria a Meta reenviar por dias; registramos e seguimos.
++      this.metrics.increment(WEBHOOK_METRIC.unknownNumber, {}, events.length);
++      this.logger.warn(
++        {
++          event: 'whatsapp.webhook.unknown_number',
++          phone_number_id: phoneNumberId,
++          events: events.length,
++        },
++        'Webhook de número sem tenant: eventos descartados',
++      );
++      return { tenantId: null, inserted: 0, duplicates: 0, unknown: events.length };
++    }
++
++    const { tenantId } = connection;
++    const result = await storeWebhookEvents(
++      tenantId,
++      events.map((e) => toNewWebhookEvent(e)),
++    );
++
++    const labels = { tenant_id: tenantId };
++    for (const kind of ['message', 'status', 'error'] as const) {
++      const count = events.filter((e) => e.kind === kind).length;
++      if (count > 0)
++        this.metrics.increment(WEBHOOK_METRIC.eventsReceived, { ...labels, kind }, count);
++    }
++    this.metrics.increment(WEBHOOK_METRIC.eventsStored, labels, result.inserted);
++    if (result.duplicates > 0) {
++      this.metrics.increment(WEBHOOK_METRIC.eventsDuplicate, labels, result.duplicates);
++    }
++    this.logger.info(
++      {
++        event: 'whatsapp.webhook.stored',
++        tenant_id: tenantId,
++        phone_number_id: phoneNumberId,
++        received: result.received,
++        inserted: result.inserted,
++        duplicates: result.duplicates,
++      },
++      'Eventos do WhatsApp gravados',
++    );
++    return { tenantId, inserted: result.inserted, duplicates: result.duplicates, unknown: 0 };
++  }
++}
+diff --git a/apps/api/tests/config.test.ts b/apps/api/tests/config.test.ts
+index 135fd21..7557e37 100644
+--- a/apps/api/tests/config.test.ts
++++ b/apps/api/tests/config.test.ts
+@@ -108,10 +108,41 @@ describe('Configuração validada com Zod', () => {
+       NODE_ENV: 'production',
+       BETTER_AUTH_URL: 'https://api.exemplo.com',
+       WEB_URL: 'https://app.exemplo.com',
++      WHATSAPP_APP_SECRET: 'segredo-do-app-da-meta',
++      WHATSAPP_VERIFY_TOKEN: 'token-de-verificacao',
+     });
+     assert.equal(config.swaggerEnabled, false);
+   });
+ 
++  it('webhook do WhatsApp: opcional em desenvolvimento, obrigatório em produção', () => {
++    const dev = loadConfig(VALID_ENV);
++    assert.deepEqual(dev.whatsapp, { appSecret: undefined, verifyToken: undefined });
++
++    const configured = loadConfig({
++      ...VALID_ENV,
++      WHATSAPP_APP_SECRET: 'segredo-do-app-da-meta',
++      WHATSAPP_VERIFY_TOKEN: 'token-de-verificacao',
++    });
++    assert.deepEqual(configured.whatsapp, {
++      appSecret: 'segredo-do-app-da-meta',
++      verifyToken: 'token-de-verificacao',
++    });
++
++    const issues = issuesOf({
++      ...VALID_ENV,
++      NODE_ENV: 'production',
++      BETTER_AUTH_URL: 'https://api.exemplo.com',
++      WEB_URL: 'https://app.exemplo.com',
++    });
++    assert.ok(issues.some((i) => i.startsWith('WHATSAPP_APP_SECRET')));
++    assert.ok(issues.some((i) => i.startsWith('WHATSAPP_VERIFY_TOKEN')));
++  });
++
++  it('token de verificação curto demais é recusado', () => {
++    const issues = issuesOf({ ...VALID_ENV, WHATSAPP_VERIFY_TOKEN: 'curto' });
++    assert.ok(issues.some((i) => i.startsWith('WHATSAPP_VERIFY_TOKEN')));
++  });
++
+   it('FALHA RÁPIDA: o processo não sobe com configuração inválida', () => {
+     const apiDir = path.resolve(__dirname, '..');
+     const result = spawnSync(process.execPath, ['--import', 'tsx', 'src/main.ts'], {
+diff --git a/apps/api/tests/fixtures/whatsapp/README.md b/apps/api/tests/fixtures/whatsapp/README.md
+new file mode 100644
+index 0000000..be7510f
+--- /dev/null
++++ b/apps/api/tests/fixtures/whatsapp/README.md
+@@ -0,0 +1,18 @@
++# Fixtures do webhook do WhatsApp (API)
++
++- `official-*.json`: exemplos copiados da documentação da Meta.
++- Os demais são modelados a partir da documentação (não são capturas reais).
++- `real/`: payloads **reais, já anonimizados**, capturados do seu número de teste.
++  O teste `whatsapp-webhook.test.ts` envia cada arquivo daqui ao endpoint, com assinatura válida,
++  e exige 200 e eventos gravados.
++
++## Como adicionar um payload real
++
++1. Receba uma mensagem/status no seu número de teste e copie o JSON do log (ou do painel da Meta).
++2. Anonimize (troca telefones, nomes, textos, ids de mensagem e de mídia):
++
++   ```bash
++   pnpm --filter @megabot/api webhook:anonymize ~/captura.json apps/api/tests/fixtures/whatsapp/real/texto.json
++   ```
++
++3. **Abra o arquivo e confira** se não sobrou nenhum dado pessoal antes de commitar.
+diff --git a/apps/api/tests/fixtures/whatsapp/image.json b/apps/api/tests/fixtures/whatsapp/image.json
+new file mode 100644
+index 0000000..84d5f9c
+--- /dev/null
++++ b/apps/api/tests/fixtures/whatsapp/image.json
+@@ -0,0 +1,42 @@
++{
++  "object": "whatsapp_business_account",
++  "entry": [
++    {
++      "id": "102290129340398",
++      "changes": [
++        {
++          "value": {
++            "messaging_product": "whatsapp",
++            "metadata": {
++              "display_phone_number": "15550783881",
++              "phone_number_id": "106540352242922"
++            },
++            "contacts": [
++              {
++                "profile": {
++                  "name": "Sheena Nelson"
++                },
++                "wa_id": "16505551234"
++              }
++            ],
++            "messages": [
++              {
++                "from": "16505551234",
++                "id": "wamid.HBgLMTY1MDM4Nzk0MzkVAgASGBQzQTRBNjU5OUFFRTAzODEwMTQ0RgA=",
++                "timestamp": "1749416383",
++                "type": "image",
++                "image": {
++                  "id": "1234567890",
++                  "mime_type": "image/jpeg",
++                  "sha256": "abc123",
++                  "caption": "Segue a foto"
++                }
++              }
++            ]
++          },
++          "field": "messages"
++        }
++      ]
++    }
++  ]
++}
+diff --git a/apps/api/tests/fixtures/whatsapp/official-status-delivered.json b/apps/api/tests/fixtures/whatsapp/official-status-delivered.json
+new file mode 100644
+index 0000000..c208d75
+--- /dev/null
++++ b/apps/api/tests/fixtures/whatsapp/official-status-delivered.json
+@@ -0,0 +1,49 @@
++{
++  "object": "whatsapp_business_account",
++  "entry": [
++    {
++      "id": "102290129340398",
++      "changes": [
++        {
++          "value": {
++            "messaging_product": "whatsapp",
++            "metadata": {
++              "display_phone_number": "15550783881",
++              "phone_number_id": "106540352242922"
++            },
++            "contacts": [
++              {
++                "profile": {
++                  "name": "Sheena Nelson"
++                },
++                "wa_id": "16505551234",
++                "user_id": "US.13491208655302741918"
++              }
++            ],
++            "statuses": [
++              {
++                "id": "wamid.HBgLMTY1MDM4Nzk0MzkVAgARGBI3MTE5MjVBOTE3MDk5QUVFM0YA",
++                "status": "delivered",
++                "timestamp": "1750263773",
++                "recipient_id": "16505551234",
++                "recipient_user_id": "US.13491208655302741918",
++                "conversation": {
++                  "id": "6ceb9d929c9bdc4f90e967a32f8639b4",
++                  "origin": {
++                    "type": "service"
++                  }
++                },
++                "pricing": {
++                  "billable": true,
++                  "pricing_model": "CBP",
++                  "category": "service"
++                }
++              }
++            ]
++          },
++          "field": "messages"
++        }
++      ]
++    }
++  ]
++}
+diff --git a/apps/api/tests/fixtures/whatsapp/official-text.json b/apps/api/tests/fixtures/whatsapp/official-text.json
+new file mode 100644
+index 0000000..100d7cb
+--- /dev/null
++++ b/apps/api/tests/fixtures/whatsapp/official-text.json
+@@ -0,0 +1,41 @@
++{
++  "object": "whatsapp_business_account",
++  "entry": [
++    {
++      "id": "102290129340398",
++      "changes": [
++        {
++          "value": {
++            "messaging_product": "whatsapp",
++            "metadata": {
++              "display_phone_number": "15550783881",
++              "phone_number_id": "106540352242922"
++            },
++            "contacts": [
++              {
++                "profile": {
++                  "name": "Sheena Nelson"
++                },
++                "wa_id": "16505551234",
++                "user_id": "US.13491208655302741918"
++              }
++            ],
++            "messages": [
++              {
++                "from": "16505551234",
++                "from_user_id": "US.13491208655302741918",
++                "id": "wamid.HBgLMTY1MDM4Nzk0MzkVAgASGBQzQTRBNjU5OUFFRTAzODEwMTQ0RgA=",
++                "timestamp": "1749416383",
++                "type": "text",
++                "text": {
++                  "body": "Does it come in another color?"
++                }
++              }
++            ]
++          },
++          "field": "messages"
++        }
++      ]
++    }
++  ]
++}
+diff --git a/apps/api/tests/fixtures/whatsapp/real/.gitkeep b/apps/api/tests/fixtures/whatsapp/real/.gitkeep
+new file mode 100644
+index 0000000..e69de29
+diff --git a/apps/api/tests/fixtures/whatsapp/status-failed-131047.json b/apps/api/tests/fixtures/whatsapp/status-failed-131047.json
+new file mode 100644
+index 0000000..b338565
+--- /dev/null
++++ b/apps/api/tests/fixtures/whatsapp/status-failed-131047.json
+@@ -0,0 +1,39 @@
++{
++  "object": "whatsapp_business_account",
++  "entry": [
++    {
++      "id": "102290129340398",
++      "changes": [
++        {
++          "value": {
++            "messaging_product": "whatsapp",
++            "metadata": {
++              "display_phone_number": "15550783881",
++              "phone_number_id": "106540352242922"
++            },
++            "statuses": [
++              {
++                "id": "wamid.FAIL1",
++                "status": "failed",
++                "timestamp": "1750263773",
++                "recipient_id": "16505551234",
++                "errors": [
++                  {
++                    "code": 131047,
++                    "title": "Re-engagement message",
++                    "message": "Re-engagement message",
++                    "error_data": {
++                      "details": "Message failed to send because more than 24 hours have passed since the customer last replied to this number."
++                    },
++                    "href": "https://developers.facebook.com/docs/whatsapp/cloud-api/support/error-codes/"
++                  }
++                ]
++              }
++            ]
++          },
++          "field": "messages"
++        }
++      ]
++    }
++  ]
++}
+diff --git a/apps/api/tests/fixtures/whatsapp/status-read.json b/apps/api/tests/fixtures/whatsapp/status-read.json
+new file mode 100644
+index 0000000..a20153f
+--- /dev/null
++++ b/apps/api/tests/fixtures/whatsapp/status-read.json
+@@ -0,0 +1,28 @@
++{
++  "object": "whatsapp_business_account",
++  "entry": [
++    {
++      "id": "102290129340398",
++      "changes": [
++        {
++          "value": {
++            "messaging_product": "whatsapp",
++            "metadata": {
++              "display_phone_number": "15550783881",
++              "phone_number_id": "106540352242922"
++            },
++            "statuses": [
++              {
++                "id": "wamid.HBgLMTY1MDM4Nzk0MzkVAgARGBI3MTE5MjVBOTE3MDk5QUVFM0YA",
++                "status": "read",
++                "timestamp": "1750263773",
++                "recipient_id": "16505551234"
++              }
++            ]
++          },
++          "field": "messages"
++        }
++      ]
++    }
++  ]
++}
+diff --git a/apps/api/tests/fixtures/whatsapp/status-sent.json b/apps/api/tests/fixtures/whatsapp/status-sent.json
+new file mode 100644
+index 0000000..58884e1
+--- /dev/null
++++ b/apps/api/tests/fixtures/whatsapp/status-sent.json
+@@ -0,0 +1,28 @@
++{
++  "object": "whatsapp_business_account",
++  "entry": [
++    {
++      "id": "102290129340398",
++      "changes": [
++        {
++          "value": {
++            "messaging_product": "whatsapp",
++            "metadata": {
++              "display_phone_number": "15550783881",
++              "phone_number_id": "106540352242922"
++            },
++            "statuses": [
++              {
++                "id": "wamid.HBgLMTY1MDM4Nzk0MzkVAgARGBI3MTE5MjVBOTE3MDk5QUVFM0YA",
++                "status": "sent",
++                "timestamp": "1750263773",
++                "recipient_id": "16505551234"
++              }
++            ]
++          },
++          "field": "messages"
++        }
++      ]
++    }
++  ]
++}
+diff --git a/apps/api/tests/fixtures/whatsapp/unknown-type-order.json b/apps/api/tests/fixtures/whatsapp/unknown-type-order.json
+new file mode 100644
+index 0000000..bed849e
+--- /dev/null
++++ b/apps/api/tests/fixtures/whatsapp/unknown-type-order.json
+@@ -0,0 +1,40 @@
++{
++  "object": "whatsapp_business_account",
++  "entry": [
++    {
++      "id": "102290129340398",
++      "changes": [
++        {
++          "value": {
++            "messaging_product": "whatsapp",
++            "metadata": {
++              "display_phone_number": "15550783881",
++              "phone_number_id": "106540352242922"
++            },
++            "contacts": [
++              {
++                "profile": {
++                  "name": "Sheena Nelson"
++                },
++                "wa_id": "16505551234"
++              }
++            ],
++            "messages": [
++              {
++                "from": "16505551234",
++                "id": "wamid.HBgLMTY1MDM4Nzk0MzkVAgASGBQzQTRBNjU5OUFFRTAzODEwMTQ0RgA=",
++                "timestamp": "1749416383",
++                "type": "order",
++                "order": {
++                  "catalog_id": "c1",
++                  "product_items": []
++                }
++              }
++            ]
++          },
++          "field": "messages"
++        }
++      ]
++    }
++  ]
++}
+diff --git a/apps/api/tests/helpers.ts b/apps/api/tests/helpers.ts
+index 0dc8b0f..6ee5ad7 100644
+--- a/apps/api/tests/helpers.ts
++++ b/apps/api/tests/helpers.ts
+@@ -57,6 +57,7 @@ export function createTestConfig(port: number, overrides: Partial<AppConfig> = {
+     rateLimit: { windowMs: 60_000, max: 10_000, authMax: 10_000 },
+     trustProxy: false,
+     swaggerEnabled: false,
++    whatsapp: { appSecret: undefined, verifyToken: undefined },
+     ...overrides,
+   };
+ }
+diff --git a/apps/api/tests/openapi.test.ts b/apps/api/tests/openapi.test.ts
+index d2eaacb..b29fbed 100644
+--- a/apps/api/tests/openapi.test.ts
++++ b/apps/api/tests/openapi.test.ts
+@@ -9,7 +9,7 @@ describe('Contrato OpenAPI', () => {
+     const spec = await generateOpenApiSpec();
+ 
+     assert.equal(spec.openapi.startsWith('3.'), true);
+-    for (const route of ['/health', '/health/ready', '/me']) {
++    for (const route of ['/health', '/health/ready', '/me', '/webhooks/whatsapp']) {
+       assert.ok(spec.paths[route], `${route} ausente no contrato`);
+     }
+ 
+@@ -26,6 +26,7 @@ describe('Contrato OpenAPI', () => {
+         'MeTenantDto',
+         'MeUserDto',
+         'ReadinessResponseDto',
++        'WebhookAckDto',
+       ],
+     );
+   });
+diff --git a/apps/api/tests/whatsapp-anonymize.test.ts b/apps/api/tests/whatsapp-anonymize.test.ts
+new file mode 100644
+index 0000000..33a3bba
+--- /dev/null
++++ b/apps/api/tests/whatsapp-anonymize.test.ts
+@@ -0,0 +1,56 @@
++import { describe, it } from 'node:test';
++import assert from 'node:assert/strict';
++import { parseWebhook } from '@megabot/whatsapp';
++import { anonymizeWebhook } from '../scripts/anonymize-webhook';
++import { fixtureJson } from './whatsapp-fixtures';
++
++describe('Anonimizador de payloads reais', () => {
++  it('remove telefones, nomes e texto, mantendo o formato e as referências', () => {
++    const original = fixtureJson('official-text');
++    const anon = anonymizeWebhook(original);
++    const text = JSON.stringify(anon);
++
++    for (const secret of [
++      '16505551234',
++      '15550783881',
++      'Sheena Nelson',
++      'Does it come in another color?',
++      'US.13491208655302741918',
++      'wamid.HBgLMTY1MDM4Nzk0MzkVAgASGBQzQTRBNjU5OUFFRTAzODEwMTQ0RgA=',
++    ]) {
++      assert.equal(text.includes(secret), false, `"${secret}" não foi anonimizado`);
++    }
++
++    // continua sendo um webhook válido, com o mesmo número de eventos
++    const before = parseWebhook(original);
++    const after = parseWebhook(anon);
++    assert.deepEqual(after.invalid, []);
++    assert.equal(after.events.length, before.events.length);
++  });
++
++  it('o mesmo valor real vira sempre o mesmo valor falso (referências coerentes)', () => {
++    const merged = {
++      object: 'whatsapp_business_account',
++      entry: [
++        ...(fixtureJson('official-text') as { entry: unknown[] }).entry,
++        ...(fixtureJson('official-status-delivered') as { entry: unknown[] }).entry,
++      ],
++    };
++    const events = parseWebhook(anonymizeWebhook(merged)).events;
++    const message = events.find((e) => e.kind === 'message');
++    const status = events.find((e) => e.kind === 'status');
++    assert.ok(message && status);
++    // o telefone do cliente é o mesmo na mensagem (from) e no status (recipient_id)
++    assert.equal(
++      message.kind === 'message' && message.from,
++      status.kind === 'status' && status.recipientId,
++    );
++  });
++
++  it('não altera o objeto original', () => {
++    const original = fixtureJson('official-text');
++    const copy = JSON.stringify(original);
++    anonymizeWebhook(original);
++    assert.equal(JSON.stringify(original), copy);
++  });
++});
+diff --git a/apps/api/tests/whatsapp-fixtures.ts b/apps/api/tests/whatsapp-fixtures.ts
+new file mode 100644
+index 0000000..f4613f4
+--- /dev/null
++++ b/apps/api/tests/whatsapp-fixtures.ts
+@@ -0,0 +1,30 @@
++import { existsSync, readdirSync, readFileSync } from 'node:fs';
++import path from 'node:path';
++
++const DIR = path.join(__dirname, 'fixtures', 'whatsapp');
++
++/** Número da empresa nos exemplos da Meta. Os testes o trocam por um número único por execução. */
++export const SAMPLE_PHONE_NUMBER_ID = '106540352242922';
++
++export function fixtureJson(name: string): unknown {
++  return JSON.parse(readFileSync(path.join(DIR, `${name}.json`), 'utf8'));
++}
++
++/** Fixtures reais (anonimizadas) adicionadas em tests/fixtures/whatsapp/real/. */
++export function realFixtures(): { name: string; payload: unknown }[] {
++  const dir = path.join(DIR, 'real');
++  if (!existsSync(dir)) return [];
++  return readdirSync(dir)
++    .filter((file) => file.endsWith('.json'))
++    .map((file) => ({
++      name: file,
++      payload: JSON.parse(readFileSync(path.join(dir, file), 'utf8')),
++    }));
++}
++
++/** Troca o `phone_number_id` (em qualquer profundidade) para apontar para o número do teste. */
++export function withPhoneNumberId<T>(payload: T, phoneNumberId: string): T {
++  const text = JSON.stringify(payload);
++  const next = text.replace(/"phone_number_id":"[^"]*"/g, `"phone_number_id":"${phoneNumberId}"`);
++  return JSON.parse(next) as T;
++}
+diff --git a/apps/api/tests/whatsapp-mapper.test.ts b/apps/api/tests/whatsapp-mapper.test.ts
+new file mode 100644
+index 0000000..01eff76
+--- /dev/null
++++ b/apps/api/tests/whatsapp-mapper.test.ts
+@@ -0,0 +1,79 @@
++import { describe, it } from 'node:test';
++import assert from 'node:assert/strict';
++import { parseWebhook } from '@megabot/whatsapp';
++import { groupByPhoneNumber, toNewWebhookEvent } from '../src/whatsapp/webhook-events.mapper';
++import { fixtureJson } from './whatsapp-fixtures';
++
++describe('Mapper evento -> webhook_events (chave de idempotência)', () => {
++  it('mensagem: chave message:<wamid>, hora real e payload JSON', () => {
++    const [event] = parseWebhook(fixtureJson('official-text')).events;
++    const row = toNewWebhookEvent(event!);
++
++    assert.equal(row.kind, 'message');
++    assert.equal(row.eventKey, `message:${row.wamid}`);
++    assert.equal(row.wamid, 'wamid.HBgLMTY1MDM4Nzk0MzkVAgASGBQzQTRBNjU5OUFFRTAzODEwMTQ0RgA=');
++    assert.equal(row.phoneNumberId, '106540352242922');
++    assert.equal(row.eventAt.toISOString(), new Date(1749416383 * 1000).toISOString());
++    // payload é JSON puro (datas viram texto), pronto para o jsonb
++    const payload = row.payload as { kind: string; text: string; timestamp: string };
++    assert.equal(payload.kind, 'message');
++    assert.equal(payload.text, 'Does it come in another color?');
++    assert.equal(typeof payload.timestamp, 'string');
++  });
++
++  it('status: o status entra na chave (o mesmo wamid recebe sent, delivered e read)', () => {
++    const keys = ['status-sent', 'official-status-delivered', 'status-read'].map((name) => {
++      const [event] = parseWebhook(fixtureJson(name)).events;
++      return toNewWebhookEvent(event!).eventKey;
++    });
++    assert.equal(new Set(keys).size, 3);
++    assert.ok(keys.every((k) => k.startsWith('status:')));
++    assert.ok(keys[0]!.endsWith(':sent') && keys[2]!.endsWith(':read'));
++  });
++
++  it('o mesmo evento sempre gera a mesma chave (base da deduplicação)', () => {
++    const a = toNewWebhookEvent(parseWebhook(fixtureJson('official-text')).events[0]!);
++    const b = toNewWebhookEvent(parseWebhook(fixtureJson('official-text')).events[0]!);
++    assert.equal(a.eventKey, b.eventKey);
++  });
++
++  it('erro de sistema: cada ocorrência é gravada (chave aleatória)', () => {
++    const payload = {
++      object: 'whatsapp_business_account',
++      entry: [
++        {
++          id: '1',
++          changes: [
++            {
++              field: 'messages',
++              value: {
++                metadata: { phone_number_id: '123' },
++                errors: [{ code: 131031, title: 'Account locked' }],
++              },
++            },
++          ],
++        },
++      ],
++    };
++    const event = parseWebhook(payload).events[0]!;
++    const now = new Date('2026-11-15T10:00:00Z');
++    const a = toNewWebhookEvent(event, now);
++    const b = toNewWebhookEvent(event, now);
++    assert.equal(a.kind, 'error');
++    assert.notEqual(a.eventKey, b.eventKey);
++    assert.equal(a.eventAt, now);
++  });
++
++  it('agrupa por número de WhatsApp', () => {
++    const merged = {
++      object: 'whatsapp_business_account',
++      entry: [
++        ...(fixtureJson('official-text') as { entry: unknown[] }).entry,
++        ...(fixtureJson('image') as { entry: unknown[] }).entry,
++      ],
++    };
++    const groups = groupByPhoneNumber(parseWebhook(merged).events);
++    assert.equal(groups.size, 1);
++    assert.equal(groups.get('106540352242922')?.length, 2);
++  });
++});
+diff --git a/apps/api/tests/whatsapp-webhook.test.ts b/apps/api/tests/whatsapp-webhook.test.ts
+new file mode 100644
+index 0000000..a4d60f0
+--- /dev/null
++++ b/apps/api/tests/whatsapp-webhook.test.ts
+@@ -0,0 +1,413 @@
++import { describe, it, before, after } from 'node:test';
++import assert from 'node:assert/strict';
++import { createHmac, randomUUID } from 'node:crypto';
++import { prisma, registerWhatsappConnection, withTenant } from '@megabot/database';
++import { startTestApp, type TestApp } from './helpers';
++import {
++  SAMPLE_PHONE_NUMBER_ID,
++  fixtureJson,
++  realFixtures,
++  withPhoneNumberId,
++} from './whatsapp-fixtures';
++
++const APP_SECRET = 'segredo-do-app-da-meta-para-testes';
++const VERIFY_TOKEN = 'token-de-verificacao-de-teste';
++
++const run = randomUUID().slice(0, 8);
++// Números únicos por execução (phone_number_id é único no sistema).
++const PHONE_A = `8${Date.now()}1`;
++const PHONE_B = `8${Date.now()}2`;
++const PHONE_UNKNOWN = `8${Date.now()}9`;
++
++type LogLine = Record<string, unknown> & {
++  msg?: string;
++  event?: string;
++  metric?: string;
++  request_id?: string;
++  tenant_id?: string;
++  level?: number;
++  res?: { statusCode?: number };
++};
++
++const sign = (body: string, secret = APP_SECRET) =>
++  `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`;
++
++describe('Webhook de entrada do WhatsApp', () => {
++  let t: TestApp;
++  let tenantA = '';
++  let tenantB = '';
++  const rawLogs: string[] = [];
++  const logs = (): LogLine[] =>
++    rawLogs.flatMap((chunk) => chunk.split('\n').filter(Boolean)).map((l) => JSON.parse(l));
++
++  /** Envia o payload assinado, exatamente como a Meta faria. */
++  const post = (payload: unknown, options: { signature?: string | null; body?: string } = {}) => {
++    const body = options.body ?? JSON.stringify(payload);
++    const signature = options.signature === undefined ? sign(body) : options.signature;
++    return t.api('/webhooks/whatsapp', {
++      method: 'POST',
++      rawBody: body,
++      headers: signature ? { 'x-hub-signature-256': signature } : {},
++    });
++  };
++
++  /** Payload dos exemplos, apontando para o número do teste e com wamids únicos desta execução. */
++  const sample = (name: string, phoneNumberId = PHONE_A, tag = run) => {
++    const text = JSON.stringify(withPhoneNumberId(fixtureJson(name), phoneNumberId)).replaceAll(
++      'wamid.',
++      `wamid.${tag}.`,
++    );
++    return JSON.parse(text) as { entry: { changes: { value: Record<string, unknown> }[] }[] };
++  };
++
++  const rowsOf = (tenantId: string) =>
++    withTenant(tenantId, (tx) => tx.webhookEvent.findMany({ orderBy: { receivedAt: 'asc' } }));
++
++  before(async () => {
++    t = await startTestApp({
++      config: {
++        logLevel: 'info',
++        whatsapp: { appSecret: APP_SECRET, verifyToken: VERIFY_TOKEN },
++      },
++      logStream: { write: (chunk: string) => void rawLogs.push(chunk) },
++    });
++    const [a, b] = await Promise.all([
++      prisma.tenant.create({ data: { name: 'Webhook A', slug: `wh-a-${run}` } }),
++      prisma.tenant.create({ data: { name: 'Webhook B', slug: `wh-b-${run}` } }),
++    ]);
++    tenantA = a.id;
++    tenantB = b.id;
++    await registerWhatsappConnection(tenantA, { phoneNumberId: PHONE_A, wabaId: 'waba-a' });
++    await registerWhatsappConnection(tenantB, { phoneNumberId: PHONE_B, wabaId: 'waba-b' });
++  });
++
++  after(async () => {
++    await prisma.tenant.deleteMany({ where: { id: { in: [tenantA, tenantB] } } });
++    await t.close();
++  });
++
++  describe('GET: verificação com o token', () => {
++    const verify = (query: Record<string, string>) =>
++      t.api(`/webhooks/whatsapp?${new URLSearchParams(query).toString()}`);
++    const ok = {
++      'hub.mode': 'subscribe',
++      'hub.verify_token': VERIFY_TOKEN,
++      'hub.challenge': '1158201444',
++    };
++
++    it('devolve o challenge em texto puro quando o token confere', async () => {
++      const res = await verify(ok);
++      assert.equal(res.status, 200);
++      assert.match(res.headers.get('content-type') ?? '', /^text\/plain/);
++      assert.equal(await res.text(), '1158201444');
++    });
++
++    it('recusa token errado, modo errado e parâmetros ausentes (403)', async () => {
++      assert.equal((await verify({ ...ok, 'hub.verify_token': 'errado' })).status, 403);
++      assert.equal((await verify({ ...ok, 'hub.mode': 'unsubscribe' })).status, 403);
++      assert.equal((await verify({ 'hub.mode': 'subscribe' })).status, 403);
++      assert.equal((await t.api('/webhooks/whatsapp')).status, 403);
++    });
++
++    it('não ecoa challenge com caracteres perigosos', async () => {
++      const res = await verify({ ...ok, 'hub.challenge': '<script>alert(1)</script>' });
++      assert.equal(res.status, 403);
++    });
++  });
++
++  describe('POST: autenticidade (X-Hub-Signature-256)', () => {
++    it('sem assinatura -> 401 e nada é gravado', async () => {
++      const res = await post(sample('official-text'), { signature: null });
++      assert.equal(res.status, 401);
++      assert.equal((await rowsOf(tenantA)).length, 0);
++    });
++
++    it('assinatura de outro segredo, malformada ou de outro corpo -> 401', async () => {
++      const payload = sample('official-text');
++      const body = JSON.stringify(payload);
++      assert.equal((await post(payload, { signature: sign(body, 'outro-segredo') })).status, 401);
++      assert.equal((await post(payload, { signature: 'sha256=abc' })).status, 401);
++      assert.equal((await post(payload, { signature: sign(`${body} `) })).status, 401);
++      assert.equal((await rowsOf(tenantA)).length, 0);
++    });
++
++    it('a assinatura vale para os BYTES recebidos (formatação e escapes \\u não quebram)', async () => {
++      const payload = sample('official-text', PHONE_A, `${run}-bytes`);
++      // JSON "bonito" e com acento escapado: JSON.parse -> JSON.stringify mudaria os bytes.
++      const body = JSON.stringify(payload, null, 4).replace('another color', 'another c\\u00f4lor');
++      const res = await post(payload, { body });
++      assert.equal(res.status, 200);
++      const stored = (await rowsOf(tenantA)).find((r) => r.wamid?.includes(`${run}-bytes`));
++      assert.equal((stored?.payload as { text?: string }).text, 'Does it come in another côlor?');
++    });
++
++    it('sem WHATSAPP_APP_SECRET configurado -> 503', async () => {
++      const unconfigured = await startTestApp({
++        config: { whatsapp: { appSecret: undefined, verifyToken: undefined } },
++      });
++      try {
++        const res = await unconfigured.api('/webhooks/whatsapp', {
++          method: 'POST',
++          rawBody: '{}',
++          headers: { 'x-hub-signature-256': sign('{}') },
++        });
++        assert.equal(res.status, 503);
++        assert.equal(
++          (
++            await unconfigured.api(
++              '/webhooks/whatsapp?hub.mode=subscribe&hub.verify_token=x&hub.challenge=1',
++            )
++          ).status,
++          403,
++        );
++      } finally {
++        await unconfigured.close();
++      }
++    });
++  });
++
++  describe('POST: gravação e tenant', () => {
++    it('grava a mensagem para o tenant do phone_number_id e responde 200', async () => {
++      const tag = `${run}-msg`;
++      const res = await post(sample('official-text', PHONE_A, tag));
++      assert.equal(res.status, 200);
++      assert.deepEqual(await res.json(), { status: 'ok' });
++
++      const rows = (await rowsOf(tenantA)).filter((r) => r.wamid?.includes(tag));
++      assert.equal(rows.length, 1);
++      assert.equal(rows[0]!.kind, 'message');
++      assert.equal(rows[0]!.processStatus, 'pending');
++      assert.equal(rows[0]!.phoneNumberId, PHONE_A);
++      // e NÃO aparece para o outro tenant
++      assert.equal((await rowsOf(tenantB)).filter((r) => r.wamid?.includes(tag)).length, 0);
++    });
++
++    it('reenvio do mesmo webhook não duplica (200 de novo, 1 linha)', async () => {
++      const payload = sample('image', PHONE_A, `${run}-dup`);
++      assert.equal((await post(payload)).status, 200);
++      assert.equal((await post(payload)).status, 200);
++      assert.equal((await post(payload)).status, 200);
++      assert.equal(
++        (await rowsOf(tenantA)).filter((r) => r.wamid?.includes(`${run}-dup`)).length,
++        1,
++      );
++    });
++
++    it('reenvios SIMULTÂNEOS também não duplicam', async () => {
++      const payload = sample('official-text', PHONE_A, `${run}-race`);
++      const responses = await Promise.all(Array.from({ length: 10 }, () => post(payload)));
++      assert.ok(responses.every((r) => r.status === 200));
++      assert.equal(
++        (await rowsOf(tenantA)).filter((r) => r.wamid?.includes(`${run}-race`)).length,
++        1,
++      );
++    });
++
++    it('eventos fora de ordem: read -> sent -> delivered -> (só depois) a mensagem', async () => {
++      const tag = `${run}-ooo`;
++      // Os exemplos usam o mesmo wamid para os 3 status, com horas diferentes.
++      const withTime = (name: string, seconds: number) => {
++        const payload = sample(name, PHONE_A, tag);
++        (payload.entry[0]!.changes[0]!.value.statuses as { timestamp: string }[])[0]!.timestamp =
++          String(1750263700 + seconds);
++        return payload;
++      };
++      assert.equal((await post(withTime('status-read', 30))).status, 200);
++      assert.equal((await post(withTime('status-sent', 0))).status, 200);
++      assert.equal((await post(withTime('official-status-delivered', 10))).status, 200);
++      assert.equal((await post(sample('official-text', PHONE_A, tag))).status, 200);
++
++      const rows = (await rowsOf(tenantA)).filter((r) => r.wamid?.includes(tag));
++      assert.equal(rows.length, 4, 'nenhum evento pode ser perdido por chegar fora de ordem');
++
++      const statuses = rows.filter((r) => r.kind === 'status');
++      assert.deepEqual(
++        statuses.sort((a, b) => a.eventAt.getTime() - b.eventAt.getTime()).map((r) => r.status),
++        ['sent', 'delivered', 'read'],
++        'a ordem real vem de event_at, não da ordem de chegada',
++      );
++      assert.deepEqual(
++        rows.map((r) => r.kind),
++        ['status', 'status', 'status', 'message'],
++        'a ordem de chegada fica registrada em received_at',
++      );
++    });
++
++    it('dois números (dois tenants) no mesmo lote: cada evento vai para o seu tenant', async () => {
++      const tag = `${run}-multi`;
++      const a = sample('official-text', PHONE_A, `${tag}-a`);
++      const b = sample('image', PHONE_B, `${tag}-b`);
++      const merged = { object: 'whatsapp_business_account', entry: [...a.entry, ...b.entry] };
++      assert.equal((await post(merged)).status, 200);
++
++      assert.equal((await rowsOf(tenantA)).filter((r) => r.wamid?.includes(`${tag}-a`)).length, 1);
++      assert.equal((await rowsOf(tenantA)).filter((r) => r.wamid?.includes(`${tag}-b`)).length, 0);
++      assert.equal((await rowsOf(tenantB)).filter((r) => r.wamid?.includes(`${tag}-b`)).length, 1);
++      assert.equal((await rowsOf(tenantB)).filter((r) => r.wamid?.includes(`${tag}-a`)).length, 0);
++    });
++
++    it('número sem tenant: responde 200 (a Meta não deve reenviar) e não grava nada', async () => {
++      const before = (
++        await prisma.$queryRaw<{ n: bigint }[]>`SELECT count(*) AS n FROM webhook_events`
++      )[0]!.n;
++      const res = await post(sample('official-text', PHONE_UNKNOWN, `${run}-unk`));
++      assert.equal(res.status, 200);
++      const after = (
++        await prisma.$queryRaw<{ n: bigint }[]>`SELECT count(*) AS n FROM webhook_events`
++      )[0]!.n;
++      assert.equal(after, before);
++      const warn = logs().find((l) => l.event === 'whatsapp.webhook.unknown_number');
++      assert.equal(warn?.phone_number_id, PHONE_UNKNOWN);
++    });
++
++    it('item inválido no lote não derruba os válidos', async () => {
++      const tag = `${run}-inv`;
++      const payload = sample('official-text', PHONE_A, tag);
++      const value = payload.entry[0]!.changes[0]!.value;
++      (value.messages as unknown[]).push({ id: `wamid.${tag}.bad`, type: 'text' }); // sem from/timestamp/text
++      assert.equal((await post(payload)).status, 200);
++      const rows = (await rowsOf(tenantA)).filter((r) => r.wamid?.includes(tag));
++      assert.equal(rows.length, 1);
++    });
++  });
++
++  describe('POST: corpo inválido', () => {
++    it('assinatura válida mas JSON quebrado -> 400', async () => {
++      const res = await post(null, { body: '{"object":' });
++      assert.equal(res.status, 400);
++    });
++
++    it('assinatura válida mas não é um webhook do WhatsApp -> 400', async () => {
++      assert.equal((await post({ object: 'page', entry: [] })).status, 400);
++      assert.equal((await post(null, { body: '' })).status, 400);
++    });
++
++    it('corpo acima de 3 MB -> 413 antes de qualquer conta de assinatura', async () => {
++      const body = JSON.stringify({ lixo: 'a'.repeat(3 * 1024 * 1024 + 1024) });
++      const res = await post(null, { body });
++      assert.equal(res.status, 413);
++    });
++  });
++
++  describe('Sem rate limit por IP', () => {
++    it('rajada de webhooks não leva 429 (a assinatura é a proteção)', async () => {
++      const limited = await startTestApp({
++        config: {
++          rateLimit: { windowMs: 60_000, max: 2, authMax: 2 },
++          whatsapp: { appSecret: APP_SECRET, verifyToken: VERIFY_TOKEN },
++        },
++      });
++      try {
++        const body = '{}';
++        const statuses: number[] = [];
++        for (let i = 0; i < 6; i++) {
++          const res = await limited.api('/webhooks/whatsapp', {
++            method: 'POST',
++            rawBody: body,
++            headers: { 'x-hub-signature-256': sign(body) },
++          });
++          statuses.push(res.status);
++        }
++        assert.ok(
++          statuses.every((s) => s === 400),
++          `esperado só 400 (corpo vazio), veio ${statuses}`,
++        );
++      } finally {
++        await limited.close();
++      }
++    });
++  });
++
++  describe('Logs e métricas com tenant_id', () => {
++    it('o log da requisição traz request_id e tenant_id; há log de gravação e métricas por tenant', async () => {
++      const res = await post(sample('official-text', PHONE_A, `${run}-log`));
++      assert.equal(res.status, 200);
++      const requestId = res.headers.get('x-request-id');
++      assert.ok(requestId);
++
++      const all = logs().filter((l) => l.request_id === requestId);
++      const completed = all.find((l) => l.msg === 'request completed');
++      assert.equal(completed?.tenant_id, tenantA);
++      assert.equal(completed?.res?.statusCode, 200);
++
++      const stored = all.find((l) => l.event === 'whatsapp.webhook.stored');
++      assert.equal(stored?.tenant_id, tenantA);
++      assert.equal(stored?.inserted, 1);
++
++      const metrics = all.filter((l) => l.event === 'metric');
++      const storedMetric = metrics.find((m) => m.metric === 'whatsapp_webhook_events_stored_total');
++      assert.equal(storedMetric?.tenant_id, tenantA);
++      assert.equal(storedMetric?.value, 1);
++      assert.ok(
++        metrics.some((m) => m.metric === 'whatsapp_webhook_requests_total' && m.outcome === 'ok'),
++      );
++      assert.ok(metrics.some((m) => m.metric === 'whatsapp_webhook_duration_ms'));
++    });
++
++    it('duplicado gera métrica de duplicidade', async () => {
++      const payload = sample('image', PHONE_A, `${run}-logdup`);
++      await post(payload);
++      const res = await post(payload);
++      const requestId = res.headers.get('x-request-id');
++      const dup = logs().find(
++        (l) => l.request_id === requestId && l.metric === 'whatsapp_webhook_events_duplicate_total',
++      );
++      assert.equal(dup?.tenant_id, tenantA);
++      assert.equal(dup?.value, 1);
++    });
++
++    it('assinatura inválida é logada como warn, sem conteúdo da mensagem e sem tenant', async () => {
++      const res = await post(sample('official-text'), { signature: sign('x') });
++      assert.equal(res.status, 401);
++      const requestId = res.headers.get('x-request-id');
++      const line = logs().find(
++        (l) => l.request_id === requestId && l.event === 'whatsapp.webhook.invalid_signature',
++      );
++      assert.equal(line?.level, 40);
++      assert.equal(line?.tenant_id, undefined);
++    });
++
++    it('nenhum log contém o texto das mensagens, telefones completos ou o segredo', () => {
++      const text = rawLogs.join('');
++      assert.equal(text.includes('another color'), false);
++      assert.equal(text.includes('16505551234'), false);
++      assert.equal(text.includes(APP_SECRET), false);
++      assert.equal(text.includes(VERIFY_TOKEN), false);
++    });
++  });
++
++  describe('Fixtures reais anonimizadas (tests/fixtures/whatsapp/real)', () => {
++    const real = realFixtures();
++    if (real.length === 0) {
++      it(
++        'nenhum payload real adicionado ainda (veja tests/fixtures/whatsapp/README.md)',
++        { todo: true },
++        () => {},
++      );
++    }
++    for (const [index, fixture] of real.entries()) {
++      it(`${fixture.name}: 200 e eventos gravados, e reenvio não duplica`, async () => {
++        const tag = `${run}-real${index}`;
++        const text = JSON.stringify(withPhoneNumberId(fixture.payload, PHONE_A)).replaceAll(
++          'wamid.',
++          `wamid.${tag}.`,
++        );
++        const payload = JSON.parse(text);
++        assert.equal((await post(payload)).status, 200);
++        const stored = (await rowsOf(tenantA)).filter((r) => r.wamid?.includes(tag));
++        assert.ok(stored.length > 0, 'nenhum evento gravado');
++
++        assert.equal((await post(payload)).status, 200);
++        assert.equal(
++          (await rowsOf(tenantA)).filter((r) => r.wamid?.includes(tag)).length,
++          stored.length,
++        );
++      });
++    }
++  });
++
++  it('exemplo oficial usa o número esperado (guarda contra mudança nas fixtures)', () => {
++    const text = JSON.stringify(fixtureJson('official-text'));
++    assert.ok(text.includes(SAMPLE_PHONE_NUMBER_ID));
++  });
++});
+diff --git a/apps/web/src/lib/api/schema.d.ts b/apps/web/src/lib/api/schema.d.ts
+index ea8d17c..b70b328 100644
+--- a/apps/web/src/lib/api/schema.d.ts
++++ b/apps/web/src/lib/api/schema.d.ts
+@@ -520,6 +520,30 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/webhooks/whatsapp": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        /**
++         * Verificação do webhook (handshake da Meta)
++         * @description A Meta chama este endereço ao cadastrar o webhook. Se `hub.verify_token` confere com `WHATSAPP_VERIFY_TOKEN`, devolve `hub.challenge` em texto puro.
++         */
++        get: operations["WhatsappWebhookController_verify"];
++        put?: never;
++        /**
++         * Recebe eventos do WhatsApp (mensagens e status)
++         * @description Confere `X-Hub-Signature-256`, descobre o tenant pelo `phone_number_id`, grava os eventos (idempotente por wamid) e responde 200. O processamento pesado acontece depois, no worker.
++         */
++        post: operations["WhatsappWebhookController_receive"];
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+ }
+ export type webhooks = Record<string, never>;
+ export interface components {
+@@ -630,6 +654,10 @@ export interface components {
+             /** Format: date-time */
+             updatedAt: string;
+         };
++        WebhookAckDto: {
++            /** @example ok */
++            status: string;
++        };
+     };
+     responses: never;
+     parameters: never;
+@@ -1804,4 +1832,93 @@ export interface operations {
+             };
+         };
+     };
++    WhatsappWebhookController_verify: {
++        parameters: {
++            query: {
++                "hub.challenge": unknown;
++                "hub.verify_token": unknown;
++                "hub.mode": unknown;
++            };
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        requestBody?: never;
++        responses: {
++            /** @description O próprio `hub.challenge` */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "text/plain": string;
++                };
++            };
++            /** @description Token inválido */
++            403: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "text/plain": components["schemas"]["ErrorResponseDto"];
++                };
++            };
++        };
++    };
++    WhatsappWebhookController_receive: {
++        parameters: {
++            query?: never;
++            header: {
++                /** @description `sha256=` + HMAC-SHA256 do corpo cru com o app secret da Meta */
++                "x-hub-signature-256": string;
++            };
++            path?: never;
++            cookie?: never;
++        };
++        /** @description Payload do webhook da WhatsApp Cloud API (`object: whatsapp_business_account`) */
++        requestBody: {
++            content: {
++                "application/json": {
++                    [key: string]: unknown;
++                };
++            };
++        };
++        responses: {
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["WebhookAckDto"];
++                };
++            };
++            /** @description Payload inválido */
++            400: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["ErrorResponseDto"];
++                };
++            };
++            /** @description Assinatura inválida */
++            401: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["ErrorResponseDto"];
++                };
++            };
++            /** @description Webhook não configurado */
++            503: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["ErrorResponseDto"];
++                };
++            };
++        };
++    };
+ }
+diff --git a/docs/adr/0013-webhook-de-entrada-whatsapp.md b/docs/adr/0013-webhook-de-entrada-whatsapp.md
+new file mode 100644
+index 0000000..fca51dd
+--- /dev/null
++++ b/docs/adr/0013-webhook-de-entrada-whatsapp.md
+@@ -0,0 +1,45 @@
++# ADR 0013 — Webhook de entrada do WhatsApp
++
++- **Status:** Aceita
++- **Data:** 2026-11-15
++- **Contexto da task:** T1.2
++
++## Contexto
++
++A Meta avisa por webhook cada mensagem recebida e cada mudança de status de envio. Ela reenvia o
++mesmo aviso se não receber 200, pode entregar eventos fora de ordem e identifica a empresa só pelo
++`phone_number_id`. O endpoint precisa recusar chamadas falsas, não duplicar eventos, descobrir o
++tenant e responder rápido.
++
++## Decisões
++
++| Tema              | Escolha                                                                                                                                     | Por quê                                                                                         |
++| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
++| Autenticidade     | `X-Hub-Signature-256` (HMAC-SHA256 do **corpo cru** com o app secret), conferido antes de qualquer outro passo                              | Qualquer um pode chamar a URL; só a Meta conhece o segredo                                      |
++| Corpo cru         | O bootstrap usa `express.raw` (3 MB) só em `/webhooks/whatsapp`                                                                             | Reformatar o JSON mudaria os bytes e invalidaria a assinatura                                   |
++| Verificação (GET) | Devolve `hub.challenge` em texto puro se `hub.verify_token` confere (comparação em tempo constante)                                         | Handshake exigido pela Meta                                                                     |
++| Tenant            | Tabela `whatsapp_connections` (número único no sistema) + policy de leitura por `app.phone_number_id`                                       | Mesmo padrão do login (`app.user_id`): o RLS continua valendo; só se lê UMA linha por vez       |
++| Idempotência      | `webhook_events` com `UNIQUE (tenant_id, event_key)` e `ON CONFLICT DO NOTHING`                                                             | O banco decide, então reenvios simultâneos também não duplicam                                  |
++| Chave do evento   | `message:<wamid>`, `status:<wamid>:<status>`, `error:<uuid>`                                                                                | O mesmo wamid recebe sent/delivered/read: o status precisa entrar na chave                      |
++| Fora de ordem     | Guardamos `event_at` (hora da Meta) e `received_at` (chegada); nada é descartado por chegar "tarde"                                         | Quem consome decide pela hora real; o ingresso não depende da ordem                             |
++| Caixa de entrada  | Eventos entram como `pending`; o worker os processa depois (`processed`/`failed`)                                                           | Responder 200 rápido: o webhook só valida, grava e responde                                     |
++| Respostas         | 200 gravado ou duplicado, **200 também para número sem tenant**; 401 assinatura; 400 payload inválido; 503 sem segredo; 500 falha ao gravar | Erro faz a Meta reenviar por dias: só devolvemos erro quando reenviar pode ajudar (falha nossa) |
++| Rate limit        | Rota fora do limite por IP (`@SkipThrottle`)                                                                                                | Rajadas legítimas da Meta; a assinatura e o limite de 3 MB protegem                             |
++| Métricas          | Linhas de log `event: "metric"` com `tenant_id`, atrás da interface `WhatsAppMetrics`                                                       | Ainda não há coletor (Prometheus/OTel); trocar o adaptador não mexe no resto                    |
++
++## Consequências
++
++- **Dados pessoais:** `webhook_events.payload` guarda o evento normalizado (texto, telefone, nome). Os logs
++  **nunca** os registram. Falta definir **retenção** e anonimização (LGPD) em uma task futura.
++- Número sem tenant: o evento é **descartado** (só log e métrica `unknown_number`). Se for desejado
++  reprocessar depois que o número for cadastrado, será preciso guardar esses eventos (decisão pendente).
++- Rate limit em memória e métricas em log valem para uma instância (ADR 0002, 0008).
++- Erro de sistema (`value.errors`) não tem id: reenvios geram linhas repetidas (aceitável, são raros).
++- O worker (próxima task) deve ler `pending` por tenant, ordenar por `event_at` e ser idempotente.
++- Um número pertence a **um** tenant. Mover um número entre tenants exige apagar e recriar a conexão.
++
++## Decisões pendentes
++
++- Retenção e anonimização dos eventos (LGPD) — **produto/jurídico**.
++- Guardar eventos de números ainda não cadastrados? — **produto**.
++- Como o tenant liga o número na interface (Embedded Signup da Meta ou cadastro manual) — **produto**.
+diff --git a/docs/adr/README.md b/docs/adr/README.md
+index ff32352..9b25a9b 100644
+--- a/docs/adr/README.md
++++ b/docs/adr/README.md
+@@ -5,20 +5,21 @@ um arquivo curto, versionado junto com o código, que explica **o que** foi deci
+ 
+ ## Índice
+ 
+-| Nº                                     | Decisão                                       | Status   |
+-| -------------------------------------- | --------------------------------------------- | -------- |
+-| [0001](0001-autenticacao.md)           | Provedor de autenticação (Better Auth)        | Aceita   |
+-| [0002](0002-fundacoes-da-api.md)       | Fundações da API (Zod, pino, throttler, ...)  | Aceita   |
+-| [0003](0003-nestjs-com-typescript.md)  | NestJS com TypeScript                         | Aceita   |
+-| [0004](0004-prisma-e-postgresql.md)    | Prisma + PostgreSQL com RLS                   | Aceita   |
+-| [0005](0005-pg-boss-para-filas.md)     | pg-boss para filas e jobs                     | Aceita   |
+-| [0006](0006-node-test-para-testes.md)  | node:test para testes                         | Aceita   |
+-| [0007](0007-cobranca.md)               | Cobrança (Asaas)                              | Proposta |
+-| [0008](0008-hospedagem.md)             | Hospedagem                                    | Pendente |
+-| [0009](0009-provedor-de-llm.md)        | Provedor de LLM                               | Proposta |
+-| [0010](0010-janela-de-conversa-24h.md) | Regra da conversa (janela de 24h por contato) | Aceita   |
+-| [0011](0011-regra-de-cota.md)          | Regra de cota                                 | Proposta |
+-| [0012](0012-pacote-whatsapp.md)        | Pacote `@megabot/whatsapp`                    | Aceita   |
++| Nº                                          | Decisão                                       | Status   |
++| ------------------------------------------- | --------------------------------------------- | -------- |
++| [0001](0001-autenticacao.md)                | Provedor de autenticação (Better Auth)        | Aceita   |
++| [0002](0002-fundacoes-da-api.md)            | Fundações da API (Zod, pino, throttler, ...)  | Aceita   |
++| [0003](0003-nestjs-com-typescript.md)       | NestJS com TypeScript                         | Aceita   |
++| [0004](0004-prisma-e-postgresql.md)         | Prisma + PostgreSQL com RLS                   | Aceita   |
++| [0005](0005-pg-boss-para-filas.md)          | pg-boss para filas e jobs                     | Aceita   |
++| [0006](0006-node-test-para-testes.md)       | node:test para testes                         | Aceita   |
++| [0007](0007-cobranca.md)                    | Cobrança (Asaas)                              | Proposta |
++| [0008](0008-hospedagem.md)                  | Hospedagem                                    | Pendente |
++| [0009](0009-provedor-de-llm.md)             | Provedor de LLM                               | Proposta |
++| [0010](0010-janela-de-conversa-24h.md)      | Regra da conversa (janela de 24h por contato) | Aceita   |
++| [0011](0011-regra-de-cota.md)               | Regra de cota                                 | Proposta |
++| [0012](0012-pacote-whatsapp.md)             | Pacote `@megabot/whatsapp`                    | Aceita   |
++| [0013](0013-webhook-de-entrada-whatsapp.md) | Webhook de entrada do WhatsApp                | Aceita   |
+ 
+ ## Status
+ 
+diff --git a/docs/api/foundations.md b/docs/api/foundations.md
+index e8d1010..68d1d98 100644
+--- a/docs/api/foundations.md
++++ b/docs/api/foundations.md
+@@ -18,6 +18,8 @@ A API valida tudo na inicialização. Se algo estiver errado, o processo **não
+ | `RATE_LIMIT_AUTH_MAX`                       | `20`                                                | Por IP, rotas de login/cadastro/reset                        |
+ | `TRUST_PROXY`                               | `false`                                             | `true`, número de proxies ou `loopback`                      |
+ | `SWAGGER_ENABLED`                           | `true` em dev, `false` em produção                  | Libera `/docs`                                               |
++| `WHATSAPP_APP_SECRET`                       | vazia                                               | Confere a assinatura do webhook; **obrigatória em produção** |
++| `WHATSAPP_VERIFY_TOKEN`                     | vazia                                               | Mín. 8 caracteres; **obrigatória em produção**               |
+ 
+ Web (`apps/web`): `NEXT_PUBLIC_API_URL` (obrigatória no build e na execução em produção) e `API_URL` (opcional, rede interna).
+ 
+diff --git a/docs/api/whatsapp-webhook.md b/docs/api/whatsapp-webhook.md
+new file mode 100644
+index 0000000..f576151
+--- /dev/null
++++ b/docs/api/whatsapp-webhook.md
+@@ -0,0 +1,71 @@
++# Webhook de entrada do WhatsApp
++
++Rota: `GET` e `POST` em `/webhooks/whatsapp` (pública, sem sessão). Quem protege é a assinatura da Meta.
++
++## Como funciona
++
++| Passo | O que acontece                                                                                                      |
++| ----- | ------------------------------------------------------------------------------------------------------------------- |
++| 1     | `POST` chega com o cabeçalho `X-Hub-Signature-256`. O corpo é lido **cru** (bytes exatos).                          |
++| 2     | Confere `sha256=HMAC(corpo, WHATSAPP_APP_SECRET)`. Errado: **401**, nada é gravado.                                 |
++| 3     | Interpreta o JSON com `@megabot/whatsapp`. Não é webhook do WhatsApp: **400**. Item ruim isolado: só é ignorado.    |
++| 4     | Para cada `phone_number_id`, descobre o tenant (`whatsapp_connections`). Sem tenant: loga, descarta, responde 200.  |
++| 5     | Grava em `webhook_events` como `pending`. Já existia (mesma chave): ignora. Falha no banco: **500** (Meta reenvia). |
++| 6     | Responde `200 {"status":"ok"}`. O processamento de verdade é do worker.                                             |
++
++| Resposta | Quando                                     | A Meta reenvia?                            |
++| -------- | ------------------------------------------ | ------------------------------------------ |
++| 200      | Gravado, duplicado ou número sem tenant    | não                                        |
++| 400      | Assinatura ok, mas corpo não é do WhatsApp | sim (poucas)                               |
++| 401      | Assinatura ausente ou errada               | sim                                        |
++| 413      | Corpo acima de 3 MB                        | —                                          |
++| 503      | `WHATSAPP_APP_SECRET` não configurado      | sim                                        |
++| 500      | Falha ao gravar no banco                   | sim (e é seguro: a gravação é idempotente) |
++
++## Configurar no ambiente local
++
++1. No `.env`, defina:
++   - `WHATSAPP_APP_SECRET`: Meta for Developers > seu app > Configurações > Básico > "Chave secreta do app".
++   - `WHATSAPP_VERIFY_TOKEN`: invente (`openssl rand -hex 16`).
++2. Suba a API (`pnpm dev`) e o túnel (`pnpm tunnel`). Anote a URL HTTPS do ngrok.
++3. Meta for Developers > WhatsApp > Configuração > Webhook:
++   - URL de callback: `https://SEU-TUNEL.ngrok-free.app/webhooks/whatsapp`
++   - Verificar token: o mesmo `WHATSAPP_VERIFY_TOKEN`
++   - Clique em **Verificar e salvar** (a Meta chama o `GET`) e assine o campo **messages**.
++4. Ligue o seu número a um tenant (ainda não há tela):
++   - Faça login no sistema e abra `GET /me`: copie `tenant.id`.
++   - Pegue `phone_number_id` e `waba_id` em WhatsApp > Configuração da API.
++   - Rode: `pnpm db:whatsapp-connect --tenant <tenant.id> --phone-number-id <id> --waba-id <id>`
++5. Envie uma mensagem para o número de teste. Confira no banco:
++
++   ```bash
++   docker exec -it megabot_postgres psql -U postgres -d megabot \
++     -c "select kind, status, wamid, event_at, process_status from webhook_events order by received_at desc limit 5;"
++   ```
++
++   (Como `postgres` você enxerga tudo; a aplicação enxerga só o próprio tenant, por causa do RLS.)
++
++## Testar sem a Meta (curl assinado)
++
++```bash
++SECRET='o-mesmo-WHATSAPP_APP_SECRET'
++BODY='{"object":"whatsapp_business_account","entry":[{"id":"1","changes":[{"field":"messages","value":{"messaging_product":"whatsapp","metadata":{"display_phone_number":"15550001111","phone_number_id":"SEU_PHONE_NUMBER_ID"},"contacts":[{"profile":{"name":"Teste"},"wa_id":"5511999990000"}],"messages":[{"from":"5511999990000","id":"wamid.TESTE1","timestamp":"1749416383","type":"text","text":{"body":"oi"}}]}}]}]}'
++SIG="sha256=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SECRET" | sed 's/^.* //')"
++curl -i -X POST http://localhost:3000/webhooks/whatsapp \
++  -H 'Content-Type: application/json' -H "X-Hub-Signature-256: $SIG" --data-binary "$BODY"
++```
++
++Rodando duas vezes, a segunda continua respondendo 200, mas o banco guarda **uma** linha.
++
++## Fixtures reais anonimizadas
++
++Veja `apps/api/tests/fixtures/whatsapp/README.md`. Resumo: salve o JSON recebido, rode
++`pnpm --filter @megabot/api webhook:anonymize entrada.json apps/api/tests/fixtures/whatsapp/real/nome.json`,
++**revise** o resultado e faça commit. Todo arquivo em `real/` passa a ser testado automaticamente.
++
++## Logs e métricas
++
++- Todo log da requisição leva `request_id`; depois de resolver o tenant, o log `request completed` também leva `tenant_id`.
++- Eventos de log: `whatsapp.webhook.handled`, `whatsapp.webhook.stored` (por tenant), `whatsapp.webhook.unknown_number`, `whatsapp.webhook.invalid_signature`, `whatsapp.webhook.invalid_payload`.
++- Métricas (linhas com `event: "metric"`): `whatsapp_webhook_requests_total{outcome}`, `whatsapp_webhook_events_received_total{tenant_id,kind}`, `whatsapp_webhook_events_stored_total{tenant_id}`, `whatsapp_webhook_events_duplicate_total{tenant_id}`, `whatsapp_webhook_unknown_number_total`, `whatsapp_webhook_duration_ms{outcome}`.
++- Nunca são registrados: texto das mensagens, telefones completos, segredos.
+diff --git a/package.json b/package.json
+index ce8d091..e0f310d 100644
+--- a/package.json
++++ b/package.json
+@@ -19,6 +19,7 @@
+     "db:reset": "docker compose down -v && docker compose up -d",
+     "db:generate": "pnpm --filter @megabot/database db:generate",
+     "db:migrate": "pnpm --filter @megabot/database db:migrate:deploy",
++    "db:whatsapp-connect": "pnpm --filter @megabot/database whatsapp:connect",
+     "openapi:generate": "pnpm --filter @megabot/api openapi:generate && pnpm --filter @megabot/web api:types",
+     "tunnel": "npx ngrok http 3000"
+   },
+diff --git a/packages/database/README.md b/packages/database/README.md
+index 534c6e8..309f1c2 100644
+--- a/packages/database/README.md
++++ b/packages/database/README.md
+@@ -6,7 +6,9 @@ Schema, migrations, cliente Prisma e isolamento multitenant via Row Level Securi
+ 
+ - `tenants`: empresas.
+ - `users`: usuários.
+-- `memberships`: vínculo entre usuário e tenant (`role`: `OWNER`, `ADMIN` ou `MEMBER`). **Única tabela com RLS hoje.**
++- `memberships`: vínculo entre usuário e tenant (`role`: `OWNER`, `ADMIN` ou `MEMBER`). Tem RLS.
++- `whatsapp_connections`: qual número do WhatsApp (`phone_number_id`, único no sistema) pertence a qual tenant. Tem RLS.
++- `webhook_events`: caixa de entrada dos webhooks do WhatsApp, única por `(tenant_id, event_key)`. Tem RLS.
+ 
+ > Decisão de escopo: `tenants` e `users` não têm RLS. Qualquer sessão com acesso ao banco consegue listá-las. Ao criar tabelas que pertencem a um tenant, siga o checklist da seção "Adicionando RLS a uma nova tabela".
+ 
+@@ -130,3 +132,18 @@ inserir a membership; sem isso o `WITH CHECK` da policy bloqueia o INSERT.
+ 
+ `pnpm --filter @megabot/database build` gera o Prisma Client e compila `src/` para `dist/` (CommonJS), que é o
+ que a API usa em runtime. Os testes e o typecheck continuam usando `src/` diretamente.
++
++---
++
++## WhatsApp: descobrindo o tenant pelo número e gravando webhooks
++
++O webhook da Meta só traz o `phone_number_id`: ainda não sabemos o tenant. Mesmo padrão da seção anterior, uma segunda policy de **só leitura**:
++
++- `whatsapp_connection_lookup_policy` libera o SELECT da conexão cujo número está em `app.phone_number_id` (função `current_app_phone_number_id()`). Dá para ler UMA linha por vez, nunca listar as de todos os tenants.
++- `findWhatsappConnectionByPhoneNumberId(phoneNumberId)` é o único ponto que usa essa policy. Devolve `{ tenantId, wabaId }` ou `null`.
++- `storeWebhookEvents(tenantId, events)` grava via `withTenant` com `createMany({ skipDuplicates: true })` (`ON CONFLICT DO NOTHING`). Devolve quantos foram inseridos e quantos eram duplicados.
++- `registerWhatsappConnection(tenantId, ...)` liga um número a um tenant. Enquanto não existe tela para isso: `pnpm db:whatsapp-connect --tenant <uuid> --phone-number-id <id> --waba-id <id>`.
++
++**Chave de idempotência (`event_key`):** `message:<wamid>`, `status:<wamid>:<status>` (o mesmo wamid recebe sent, delivered e read) ou `error:<uuid>` (erros de sistema não têm id). **Ordem real:** use `event_at` (hora da Meta); `received_at` é só a ordem de chegada.
++
++Testes: `tests/integration/whatsapp-webhook.test.ts`. Rollback: `prisma/migrations/20261115150000_whatsapp_webhook/rollback.sql` (rode **antes** dos rollbacks das migrations anteriores).
+diff --git a/packages/database/package.json b/packages/database/package.json
+index 19821af..4994c1c 100644
+--- a/packages/database/package.json
++++ b/packages/database/package.json
+@@ -10,6 +10,7 @@
+     "db:migrate:dev": "prisma migrate dev",
+     "db:migrate:deploy": "prisma migrate deploy",
+     "db:studio": "prisma studio",
++    "whatsapp:connect": "tsx --env-file=../../.env scripts/connect-whatsapp-number.ts",
+     "lint": "eslint .",
+     "check-types": "tsc --noEmit",
+     "test": "node --env-file=../../.env --import tsx --test --test-concurrency=1 tests/**/*.test.ts"
+diff --git a/packages/database/prisma/migrations/20261115150000_whatsapp_webhook/migration.sql b/packages/database/prisma/migrations/20261115150000_whatsapp_webhook/migration.sql
+new file mode 100644
+index 0000000..29863ab
+--- /dev/null
++++ b/packages/database/prisma/migrations/20261115150000_whatsapp_webhook/migration.sql
+@@ -0,0 +1,104 @@
++-- T1.2 — Webhook de entrada do WhatsApp
++--
++-- Duas tabelas novas:
++--   whatsapp_connections: qual número do WhatsApp (phone_number_id) pertence a qual tenant.
++--   webhook_events:       caixa de entrada dos eventos recebidos (idempotente por tenant + event_key).
++--
++-- Ambas têm RLS com FORCE, igual a `memberships`.
++
++-- CreateTable
++CREATE TABLE "whatsapp_connections" (
++    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
++    "tenant_id" UUID NOT NULL,
++    "phone_number_id" TEXT NOT NULL,
++    "waba_id" TEXT NOT NULL,
++    "display_phone_number" TEXT,
++    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
++    "updated_at" TIMESTAMPTZ(6) NOT NULL,
++
++    CONSTRAINT "whatsapp_connections_pkey" PRIMARY KEY ("id")
++);
++
++-- CreateTable
++CREATE TABLE "webhook_events" (
++    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
++    "tenant_id" UUID NOT NULL,
++    "phone_number_id" TEXT NOT NULL,
++    "event_key" TEXT NOT NULL,
++    "kind" TEXT NOT NULL,
++    "wamid" TEXT,
++    "status" TEXT,
++    "event_at" TIMESTAMPTZ(6) NOT NULL,
++    "payload" JSONB NOT NULL,
++    "process_status" TEXT NOT NULL DEFAULT 'pending',
++    "processed_at" TIMESTAMPTZ(6),
++    "received_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
++
++    CONSTRAINT "webhook_events_pkey" PRIMARY KEY ("id"),
++    CONSTRAINT "webhook_events_kind_check" CHECK ("kind" IN ('message', 'status', 'error')),
++    CONSTRAINT "webhook_events_process_status_check" CHECK ("process_status" IN ('pending', 'processed', 'failed'))
++);
++
++-- CreateIndex
++-- Um número de WhatsApp pertence a UM tenant (global, não por tenant).
++CREATE UNIQUE INDEX "whatsapp_connections_phone_number_id_key" ON "whatsapp_connections"("phone_number_id");
++
++-- CreateIndex
++CREATE INDEX "whatsapp_connections_tenant_id_idx" ON "whatsapp_connections"("tenant_id");
++
++-- CreateIndex
++-- A CHAVE DE IDEMPOTÊNCIA: reenvio do mesmo evento cai aqui e é ignorado (ON CONFLICT DO NOTHING).
++CREATE UNIQUE INDEX "webhook_events_tenant_id_event_key_key" ON "webhook_events"("tenant_id", "event_key");
++
++-- CreateIndex
++-- Fila de trabalho: "me dê os eventos pendentes deste tenant, do mais antigo para o mais novo".
++CREATE INDEX "webhook_events_tenant_id_process_status_received_at_idx" ON "webhook_events"("tenant_id", "process_status", "received_at");
++
++-- CreateIndex
++CREATE INDEX "webhook_events_tenant_id_wamid_idx" ON "webhook_events"("tenant_id", "wamid");
++
++-- AddForeignKey
++ALTER TABLE "whatsapp_connections" ADD CONSTRAINT "whatsapp_connections_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE;
++
++-- AddForeignKey
++ALTER TABLE "webhook_events" ADD CONSTRAINT "webhook_events_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE;
++
++-- ---------------------------------------------------------------------------
++-- RLS
++-- ---------------------------------------------------------------------------
++
++-- Função que lê o número da sessão (mesmo padrão de current_tenant_id / current_app_user_id).
++CREATE OR REPLACE FUNCTION current_app_phone_number_id() RETURNS TEXT AS $$
++BEGIN
++  RETURN NULLIF(current_setting('app.phone_number_id', true), '');
++EXCEPTION
++  WHEN OTHERS THEN
++    RETURN NULL;
++END;
++$$ LANGUAGE plpgsql STABLE SECURITY INVOKER;
++
++ALTER TABLE "whatsapp_connections" ENABLE ROW LEVEL SECURITY;
++ALTER TABLE "whatsapp_connections" FORCE ROW LEVEL SECURITY;
++ALTER TABLE "webhook_events" ENABLE ROW LEVEL SECURITY;
++ALTER TABLE "webhook_events" FORCE ROW LEVEL SECURITY;
++
++DROP POLICY IF EXISTS tenant_isolation_policy ON "whatsapp_connections";
++CREATE POLICY tenant_isolation_policy ON "whatsapp_connections"
++  FOR ALL
++  USING (tenant_id = current_tenant_id())
++  WITH CHECK (tenant_id = current_tenant_id());
++
++-- Por que esta segunda policy existe? Quando o webhook chega, ainda NÃO sabemos o tenant:
++-- só temos o phone_number_id. Ela libera o SELECT da conexão cujo número está em
++-- `app.phone_number_id` (mesma ideia de membership_self_select_policy). Só leitura, e só
++-- de UMA linha por vez: não dá para listar as conexões de todos os tenants.
++DROP POLICY IF EXISTS whatsapp_connection_lookup_policy ON "whatsapp_connections";
++CREATE POLICY whatsapp_connection_lookup_policy ON "whatsapp_connections"
++  FOR SELECT
++  USING (phone_number_id = current_app_phone_number_id());
++
++DROP POLICY IF EXISTS tenant_isolation_policy ON "webhook_events";
++CREATE POLICY tenant_isolation_policy ON "webhook_events"
++  FOR ALL
++  USING (tenant_id = current_tenant_id())
++  WITH CHECK (tenant_id = current_tenant_id());
+diff --git a/packages/database/prisma/migrations/20261115150000_whatsapp_webhook/rollback.sql b/packages/database/prisma/migrations/20261115150000_whatsapp_webhook/rollback.sql
+new file mode 100644
+index 0000000..fd39a7e
+--- /dev/null
++++ b/packages/database/prisma/migrations/20261115150000_whatsapp_webhook/rollback.sql
+@@ -0,0 +1,4 @@
++-- Reversão manual (Rollback script). As policies saem junto com as tabelas.
++DROP TABLE IF EXISTS "webhook_events";
++DROP TABLE IF EXISTS "whatsapp_connections";
++DROP FUNCTION IF EXISTS current_app_phone_number_id();
+diff --git a/packages/database/prisma/schema.prisma b/packages/database/prisma/schema.prisma
+index caa1680..7793014 100644
+--- a/packages/database/prisma/schema.prisma
++++ b/packages/database/prisma/schema.prisma
+@@ -6,6 +6,7 @@ generator client {
+ datasource db {
+   provider = "postgresql"
+ }
++
+ enum Role {
+   OWNER
+   ADMIN
+@@ -13,12 +14,14 @@ enum Role {
+ }
+ 
+ model Tenant {
+-  id        String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+-  name      String       @db.VarChar(255)
+-  slug      String       @unique @db.VarChar(255)
+-  createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+-  updatedAt DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+-  members   Membership[]
++  id                  String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
++  name                String               @db.VarChar(255)
++  slug                String               @unique @db.VarChar(255)
++  createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
++  updatedAt           DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
++  members             Membership[]
++  whatsappConnections WhatsappConnection[]
++  webhookEvents       WebhookEvent[]
+ 
+   @@map("tenants")
+ }
+@@ -108,3 +111,48 @@ model Membership {
+   @@index([userId])
+   @@map("memberships")
+ }
++
++// ---------------------------------------------------------------------------
++// WhatsApp (T1.2). Ambas têm RLS (ver migration *_whatsapp_webhook).
++// ---------------------------------------------------------------------------
++
++/// Liga um número do WhatsApp (phone_number_id) a um tenant. O número é único no sistema inteiro.
++model WhatsappConnection {
++  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
++  tenantId           String   @map("tenant_id") @db.Uuid
++  phoneNumberId      String   @unique @map("phone_number_id")
++  wabaId             String   @map("waba_id")
++  displayPhoneNumber String?  @map("display_phone_number")
++  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
++  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
++
++  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
++
++  @@index([tenantId])
++  @@map("whatsapp_connections")
++}
++
++/// Caixa de entrada dos webhooks. `eventKey` é único por tenant: reenvio da Meta não duplica.
++/// `kind` ∈ message | status | error e `processStatus` ∈ pending | processed | failed (CHECK no banco).
++model WebhookEvent {
++  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
++  tenantId      String    @map("tenant_id") @db.Uuid
++  phoneNumberId String    @map("phone_number_id")
++  eventKey      String    @map("event_key")
++  kind          String
++  wamid         String?
++  status        String?
++  /// Quando o evento aconteceu (hora da Meta), não quando chegou.
++  eventAt       DateTime  @map("event_at") @db.Timestamptz(6)
++  payload       Json
++  processStatus String    @default("pending") @map("process_status")
++  processedAt   DateTime? @map("processed_at") @db.Timestamptz(6)
++  receivedAt    DateTime  @default(now()) @map("received_at") @db.Timestamptz(6)
++
++  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
++
++  @@unique([tenantId, eventKey])
++  @@index([tenantId, processStatus, receivedAt])
++  @@index([tenantId, wamid])
++  @@map("webhook_events")
++}
+diff --git a/packages/database/scripts/connect-whatsapp-number.ts b/packages/database/scripts/connect-whatsapp-number.ts
+new file mode 100644
+index 0000000..079e879
+--- /dev/null
++++ b/packages/database/scripts/connect-whatsapp-number.ts
+@@ -0,0 +1,47 @@
++/**
++ * Liga um número do WhatsApp a um tenant (até existir a tela de conexão).
++ *
++ * Uso (na raiz do repositório):
++ *   pnpm db:whatsapp-connect --tenant <uuid> --phone-number-id <id> --waba-id <id> [--display <numero>]
++ *
++ * Onde achar:
++ *   - tenant: faça login e abra GET /me (campo tenant.id)
++ *   - phone-number-id e waba-id: Meta for Developers > WhatsApp > Configuração da API
++ */
++import { parseArgs } from 'node:util';
++import { prisma, registerWhatsappConnection } from '../src';
++
++async function main() {
++  const { values } = parseArgs({
++    options: {
++      tenant: { type: 'string' },
++      'phone-number-id': { type: 'string' },
++      'waba-id': { type: 'string' },
++      display: { type: 'string' },
++    },
++  });
++
++  const tenantId = values.tenant;
++  const phoneNumberId = values['phone-number-id'];
++  const wabaId = values['waba-id'];
++  if (!tenantId || !phoneNumberId || !wabaId) {
++    console.error(
++      'Uso: pnpm db:whatsapp-connect --tenant <uuid> --phone-number-id <id> --waba-id <id> [--display <numero>]',
++    );
++    process.exit(1);
++  }
++
++  const connection = await registerWhatsappConnection(tenantId, {
++    phoneNumberId,
++    wabaId,
++    ...(values.display ? { displayPhoneNumber: values.display } : {}),
++  });
++  console.info(`Número ${connection.phoneNumberId} ligado ao tenant ${connection.tenantId}.`);
++}
++
++main()
++  .catch((error: unknown) => {
++    console.error(error instanceof Error ? error.message : error);
++    process.exitCode = 1;
++  })
++  .finally(() => prisma.$disconnect());
+diff --git a/packages/database/src/index.ts b/packages/database/src/index.ts
+index e9e5459..d6df283 100644
+--- a/packages/database/src/index.ts
++++ b/packages/database/src/index.ts
+@@ -3,3 +3,12 @@ export { prisma } from './client';
+ export { withTenant, type TenantTransactionClient } from './tenant-helper';
+ export { withUser, listUserTenants, type UserTenant } from './user-helper';
+ export { provisionTenantForUser, slugify, type ProvisionResult } from './provision-tenant';
++export {
++  findWhatsappConnectionByPhoneNumberId,
++  registerWhatsappConnection,
++  storeWebhookEvents,
++  type NewWebhookEvent,
++  type RegisterWhatsappConnectionInput,
++  type StoreWebhookEventsResult,
++  type WhatsappConnectionInfo,
++} from './whatsapp';
+diff --git a/packages/database/src/whatsapp.ts b/packages/database/src/whatsapp.ts
+new file mode 100644
+index 0000000..572e12f
+--- /dev/null
++++ b/packages/database/src/whatsapp.ts
+@@ -0,0 +1,118 @@
++import { Prisma } from './generated/prisma/client';
++import { prisma } from './client';
++import { withTenant } from './tenant-helper';
++
++/** `phone_number_id` da Meta é numérico (ex.: 106540352242922). Qualquer outra coisa nem consulta o banco. */
++const PHONE_NUMBER_ID = /^\d{1,32}$/;
++
++export interface WhatsappConnectionInfo {
++  tenantId: string;
++  wabaId: string;
++}
++
++/**
++ * Descobre de qual tenant é um número do WhatsApp.
++ *
++ * É o ÚNICO ponto em que lemos `whatsapp_connections` sem saber o tenant: o webhook só traz
++ * o `phone_number_id`. A policy `whatsapp_connection_lookup_policy` libera o SELECT de UMA
++ * linha (a do número informado em `app.phone_number_id`).
++ */
++export async function findWhatsappConnectionByPhoneNumberId(
++  phoneNumberId: string,
++): Promise<WhatsappConnectionInfo | null> {
++  if (!PHONE_NUMBER_ID.test(phoneNumberId)) return null;
++
++  return prisma.$transaction(async (tx) => {
++    await tx.$executeRaw`SELECT set_config('app.phone_number_id', ${phoneNumberId}, true)`;
++    const connection = await tx.whatsappConnection.findUnique({
++      where: { phoneNumberId },
++      select: { tenantId: true, wabaId: true },
++    });
++    return connection;
++  });
++}
++
++export interface RegisterWhatsappConnectionInput {
++  phoneNumberId: string;
++  wabaId: string;
++  displayPhoneNumber?: string;
++}
++
++/**
++ * Liga um número do WhatsApp a um tenant (idempotente para o MESMO tenant).
++ * Se o número já pertence a OUTRO tenant, falha (o número é único no sistema).
++ */
++export async function registerWhatsappConnection(
++  tenantId: string,
++  input: RegisterWhatsappConnectionInput,
++) {
++  if (!PHONE_NUMBER_ID.test(input.phoneNumberId)) {
++    throw new Error('phoneNumberId inválido: use só dígitos (ex.: 106540352242922).');
++  }
++  return withTenant(tenantId, (tx) =>
++    tx.whatsappConnection.upsert({
++      where: { phoneNumberId: input.phoneNumberId },
++      create: {
++        tenantId,
++        phoneNumberId: input.phoneNumberId,
++        wabaId: input.wabaId,
++        displayPhoneNumber: input.displayPhoneNumber ?? null,
++      },
++      update: {
++        wabaId: input.wabaId,
++        displayPhoneNumber: input.displayPhoneNumber ?? null,
++      },
++    }),
++  );
++}
++
++export interface NewWebhookEvent {
++  /** Chave de idempotência (única por tenant). Ex.: `message:wamid...` ou `status:wamid...:read`. */
++  eventKey: string;
++  kind: 'message' | 'status' | 'error';
++  phoneNumberId: string;
++  wamid?: string | undefined;
++  status?: string | undefined;
++  /** Quando o evento aconteceu segundo a Meta (define a ordem real, não a de chegada). */
++  eventAt: Date;
++  payload: Prisma.InputJsonValue;
++}
++
++export interface StoreWebhookEventsResult {
++  received: number;
++  inserted: number;
++  duplicates: number;
++}
++
++/**
++ * Grava os eventos do webhook como `pending`. Eventos repetidos (mesma `eventKey` no tenant)
++ * são ignorados pelo banco (`ON CONFLICT DO NOTHING`), então reenvio da Meta é seguro.
++ * Tudo numa transação com o tenant definido (RLS).
++ */
++export async function storeWebhookEvents(
++  tenantId: string,
++  events: NewWebhookEvent[],
++): Promise<StoreWebhookEventsResult> {
++  if (events.length === 0) return { received: 0, inserted: 0, duplicates: 0 };
++
++  const result = await withTenant(tenantId, (tx) =>
++    tx.webhookEvent.createMany({
++      data: events.map((event) => ({
++        tenantId,
++        phoneNumberId: event.phoneNumberId,
++        eventKey: event.eventKey,
++        kind: event.kind,
++        wamid: event.wamid ?? null,
++        status: event.status ?? null,
++        eventAt: event.eventAt,
++        payload: event.payload,
++      })),
++      skipDuplicates: true,
++    }),
++  );
++  return {
++    received: events.length,
++    inserted: result.count,
++    duplicates: events.length - result.count,
++  };
++}
+diff --git a/packages/database/tests/integration/whatsapp-webhook.test.ts b/packages/database/tests/integration/whatsapp-webhook.test.ts
+new file mode 100644
+index 0000000..741113c
+--- /dev/null
++++ b/packages/database/tests/integration/whatsapp-webhook.test.ts
+@@ -0,0 +1,284 @@
++import { describe, it, before, after } from 'node:test';
++import assert from 'node:assert/strict';
++import { randomUUID } from 'node:crypto';
++import { prisma } from '../../src/client';
++import { withTenant } from '../../src/tenant-helper';
++import {
++  findWhatsappConnectionByPhoneNumberId,
++  registerWhatsappConnection,
++  storeWebhookEvents,
++  type NewWebhookEvent,
++} from '../../src/whatsapp';
++
++const run = randomUUID().slice(0, 8);
++// Números numéricos e únicos por execução (o phone_number_id é único no sistema).
++const PHONE_A = `9${Date.now()}1`;
++const PHONE_B = `9${Date.now()}2`;
++
++function event(overrides: Partial<NewWebhookEvent> & { eventKey: string }): NewWebhookEvent {
++  return {
++    kind: 'message',
++    phoneNumberId: PHONE_A,
++    eventAt: new Date('2026-11-15T12:00:00Z'),
++    payload: { hello: 'world' },
++    ...overrides,
++  };
++}
++
++describe('WhatsApp: conexões e webhook_events (RLS + idempotência)', () => {
++  let tenantA = '';
++  let tenantB = '';
++
++  before(async () => {
++    const [a, b] = await Promise.all([
++      prisma.tenant.create({ data: { name: 'WA A', slug: `wa-a-${run}` } }),
++      prisma.tenant.create({ data: { name: 'WA B', slug: `wa-b-${run}` } }),
++    ]);
++    tenantA = a.id;
++    tenantB = b.id;
++    await registerWhatsappConnection(tenantA, { phoneNumberId: PHONE_A, wabaId: 'waba-a' });
++    await registerWhatsappConnection(tenantB, { phoneNumberId: PHONE_B, wabaId: 'waba-b' });
++  });
++
++  after(async () => {
++    // Apaga só o que este teste criou (os eventos e conexões saem em cascata).
++    await prisma.tenant.deleteMany({ where: { id: { in: [tenantA, tenantB] } } });
++    await prisma.$disconnect();
++  });
++
++  describe('resolução do tenant por phone_number_id', () => {
++    it('encontra o tenant sem precisar saber o tenant antes', async () => {
++      assert.deepEqual(await findWhatsappConnectionByPhoneNumberId(PHONE_A), {
++        tenantId: tenantA,
++        wabaId: 'waba-a',
++      });
++      assert.deepEqual(await findWhatsappConnectionByPhoneNumberId(PHONE_B), {
++        tenantId: tenantB,
++        wabaId: 'waba-b',
++      });
++    });
++
++    it('número desconhecido ou malformado devolve null', async () => {
++      assert.equal(await findWhatsappConnectionByPhoneNumberId('1234567890123'), null);
++      assert.equal(await findWhatsappConnectionByPhoneNumberId("1'; DROP TABLE tenants;--"), null);
++      assert.equal(await findWhatsappConnectionByPhoneNumberId(''), null);
++    });
++
++    it('sem contexto nenhum, ninguém enxerga as conexões (a policy de lookup exige o número)', async () => {
++      assert.equal((await prisma.whatsappConnection.findMany()).length, 0);
++    });
++
++    it('com o contexto de um número, só aquela linha fica visível (não dá para listar todas)', async () => {
++      const rows = await prisma.$transaction(async (tx) => {
++        await tx.$executeRaw`SELECT set_config('app.phone_number_id', ${PHONE_A}, true)`;
++        return tx.whatsappConnection.findMany();
++      });
++      assert.equal(rows.length, 1);
++      assert.equal(rows[0]!.phoneNumberId, PHONE_A);
++    });
++
++    it('a policy de lookup é só de leitura: não permite inserir', async () => {
++      await assert.rejects(
++        prisma.$transaction(async (tx) => {
++          await tx.$executeRaw`SELECT set_config('app.phone_number_id', '555000111', true)`;
++          await tx.whatsappConnection.create({
++            data: { tenantId: tenantA, phoneNumberId: '555000111', wabaId: 'x' },
++          });
++        }),
++      );
++    });
++
++    it('um tenant só enxerga as próprias conexões', async () => {
++      const rows = await withTenant(tenantA, (tx) => tx.whatsappConnection.findMany());
++      assert.deepEqual(
++        rows.map((r) => r.phoneNumberId),
++        [PHONE_A],
++      );
++    });
++
++    it('registrar de novo no mesmo tenant atualiza (idempotente)', async () => {
++      await registerWhatsappConnection(tenantA, {
++        phoneNumberId: PHONE_A,
++        wabaId: 'waba-a2',
++        displayPhoneNumber: '+55 11 90000-0000',
++      });
++      assert.equal((await findWhatsappConnectionByPhoneNumberId(PHONE_A))?.wabaId, 'waba-a2');
++      await registerWhatsappConnection(tenantA, { phoneNumberId: PHONE_A, wabaId: 'waba-a' });
++    });
++
++    it('um número que já é de outro tenant não pode ser registrado por ele', async () => {
++      await assert.rejects(
++        registerWhatsappConnection(tenantB, { phoneNumberId: PHONE_A, wabaId: 'roubo' }),
++      );
++      assert.equal((await findWhatsappConnectionByPhoneNumberId(PHONE_A))?.tenantId, tenantA);
++    });
++  });
++
++  describe('webhook_events', () => {
++    it('grava os eventos como pending', async () => {
++      const result = await storeWebhookEvents(tenantA, [
++        event({ eventKey: `message:wamid.${run}.1`, wamid: `wamid.${run}.1` }),
++        event({
++          eventKey: `status:wamid.${run}.9:sent`,
++          kind: 'status',
++          wamid: `wamid.${run}.9`,
++          status: 'sent',
++        }),
++      ]);
++      assert.deepEqual(result, { received: 2, inserted: 2, duplicates: 0 });
++
++      const rows = await withTenant(tenantA, (tx) =>
++        tx.webhookEvent.findMany({ where: { eventKey: { contains: run } } }),
++      );
++      assert.equal(rows.length, 2);
++      assert.ok(rows.every((r) => r.processStatus === 'pending' && r.processedAt === null));
++    });
++
++    it('reenvio do mesmo evento é ignorado (chave única por wamid)', async () => {
++      const key = `message:wamid.${run}.dup`;
++      const first = await storeWebhookEvents(tenantA, [event({ eventKey: key, wamid: key })]);
++      const again = await storeWebhookEvents(tenantA, [event({ eventKey: key, wamid: key })]);
++      assert.equal(first.inserted, 1);
++      assert.deepEqual(again, { received: 1, inserted: 0, duplicates: 1 });
++
++      const rows = await withTenant(tenantA, (tx) =>
++        tx.webhookEvent.findMany({ where: { eventKey: key } }),
++      );
++      assert.equal(rows.length, 1);
++    });
++
++    it('duplicado no MESMO lote também é ignorado, sem derrubar o resto', async () => {
++      const key = `message:wamid.${run}.lote`;
++      const result = await storeWebhookEvents(tenantA, [
++        event({ eventKey: key }),
++        event({ eventKey: key }),
++        event({ eventKey: `${key}.outro` }),
++      ]);
++      assert.deepEqual(result, { received: 3, inserted: 2, duplicates: 1 });
++    });
++
++    it('o mesmo wamid com status diferentes (sent/delivered/read) convive', async () => {
++      const wamid = `wamid.${run}.st`;
++      const result = await storeWebhookEvents(
++        tenantA,
++        ['sent', 'delivered', 'read'].map((status) =>
++          event({ eventKey: `status:${wamid}:${status}`, kind: 'status', wamid, status }),
++        ),
++      );
++      assert.equal(result.inserted, 3);
++    });
++
++    it('eventos fora de ordem ficam ordenáveis pela hora real (event_at)', async () => {
++      const wamid = `wamid.${run}.ord`;
++      // Chegam: read, sent, delivered. Aconteceram: sent, delivered, read.
++      await storeWebhookEvents(tenantA, [
++        event({
++          eventKey: `status:${wamid}:read`,
++          kind: 'status',
++          wamid,
++          status: 'read',
++          eventAt: new Date('2026-11-15T12:00:30Z'),
++        }),
++      ]);
++      await storeWebhookEvents(tenantA, [
++        event({
++          eventKey: `status:${wamid}:sent`,
++          kind: 'status',
++          wamid,
++          status: 'sent',
++          eventAt: new Date('2026-11-15T12:00:00Z'),
++        }),
++      ]);
++      await storeWebhookEvents(tenantA, [
++        event({
++          eventKey: `status:${wamid}:delivered`,
++          kind: 'status',
++          wamid,
++          status: 'delivered',
++          eventAt: new Date('2026-11-15T12:00:10Z'),
++        }),
++      ]);
++
++      const byEventAt = await withTenant(tenantA, (tx) =>
++        tx.webhookEvent.findMany({ where: { wamid }, orderBy: { eventAt: 'asc' } }),
++      );
++      assert.deepEqual(
++        byEventAt.map((r) => r.status),
++        ['sent', 'delivered', 'read'],
++      );
++      const byArrival = await withTenant(tenantA, (tx) =>
++        tx.webhookEvent.findMany({ where: { wamid }, orderBy: { receivedAt: 'asc' } }),
++      );
++      assert.deepEqual(
++        byArrival.map((r) => r.status),
++        ['read', 'sent', 'delivered'],
++      );
++    });
++
++    it('a mesma chave em tenants diferentes não conflita', async () => {
++      const key = `message:wamid.${run}.shared`;
++      const a = await storeWebhookEvents(tenantA, [event({ eventKey: key })]);
++      const b = await storeWebhookEvents(tenantB, [
++        event({ eventKey: key, phoneNumberId: PHONE_B }),
++      ]);
++      assert.equal(a.inserted, 1);
++      assert.equal(b.inserted, 1);
++    });
++
++    it('um tenant nunca enxerga eventos de outro', async () => {
++      const key = `message:wamid.${run}.iso`;
++      await storeWebhookEvents(tenantA, [event({ eventKey: key })]);
++      const seenByB = await withTenant(tenantB, (tx) =>
++        tx.webhookEvent.findMany({ where: { eventKey: key } }),
++      );
++      assert.equal(seenByB.length, 0);
++      assert.equal((await prisma.webhookEvent.findMany({ where: { eventKey: key } })).length, 0);
++    });
++
++    it('não permite gravar evento em nome de outro tenant', async () => {
++      await assert.rejects(
++        withTenant(tenantA, (tx) =>
++          tx.webhookEvent.create({
++            data: {
++              tenantId: tenantB,
++              phoneNumberId: PHONE_B,
++              eventKey: `message:wamid.${run}.fraude`,
++              kind: 'message',
++              eventAt: new Date(),
++              payload: {},
++            },
++          }),
++        ),
++      );
++    });
++
++    it('o banco recusa kind e process_status inválidos', async () => {
++      await assert.rejects(
++        storeWebhookEvents(tenantA, [event({ eventKey: `x:${run}`, kind: 'banana' as never })]),
++      );
++      await assert.rejects(
++        withTenant(tenantA, (tx) =>
++          tx.webhookEvent.create({
++            data: {
++              tenantId: tenantA,
++              phoneNumberId: PHONE_A,
++              eventKey: `y:${run}`,
++              kind: 'message',
++              eventAt: new Date(),
++              payload: {},
++              processStatus: 'quase',
++            },
++          }),
++        ),
++      );
++    });
++
++    it('lista vazia não toca no banco', async () => {
++      assert.deepEqual(await storeWebhookEvents(tenantA, []), {
++        received: 0,
++        inserted: 0,
++        duplicates: 0,
++      });
++    });
++  });
++});
+diff --git a/packages/database/tsconfig.json b/packages/database/tsconfig.json
+index d0b7156..8317bf8 100644
+--- a/packages/database/tsconfig.json
++++ b/packages/database/tsconfig.json
+@@ -8,5 +8,5 @@
+     "skipLibCheck": true,
+     "outDir": "dist"
+   },
+-  "include": ["src/**/*", "tests/**/*", "prisma.config.ts"]
++  "include": ["src/**/*", "tests/**/*", "prisma.config.ts", "scripts/**/*"]
+ }
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index e3ab23b..e0ec4b9 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -62,6 +62,9 @@ importers:
+       '@megabot/database':
+         specifier: workspace:*
+         version: link:../../packages/database
++      '@megabot/whatsapp':
++        specifier: workspace:*
++        version: link:../../packages/whatsapp
+       '@nestjs/common':
+         specifier: ^11.0.0
+         version: 11.2.9(reflect-metadata@0.2.2)(rxjs@7.8.2)

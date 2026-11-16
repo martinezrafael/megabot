@@ -5,20 +5,21 @@ um arquivo curto, versionado junto com o código, que explica **o que** foi deci
 
 ## Índice
 
-| Nº                                     | Decisão                                       | Status   |
-| -------------------------------------- | --------------------------------------------- | -------- |
-| [0001](0001-autenticacao.md)           | Provedor de autenticação (Better Auth)        | Aceita   |
-| [0002](0002-fundacoes-da-api.md)       | Fundações da API (Zod, pino, throttler, ...)  | Aceita   |
-| [0003](0003-nestjs-com-typescript.md)  | NestJS com TypeScript                         | Aceita   |
-| [0004](0004-prisma-e-postgresql.md)    | Prisma + PostgreSQL com RLS                   | Aceita   |
-| [0005](0005-pg-boss-para-filas.md)     | pg-boss para filas e jobs                     | Aceita   |
-| [0006](0006-node-test-para-testes.md)  | node:test para testes                         | Aceita   |
-| [0007](0007-cobranca.md)               | Cobrança (Asaas)                              | Proposta |
-| [0008](0008-hospedagem.md)             | Hospedagem                                    | Pendente |
-| [0009](0009-provedor-de-llm.md)        | Provedor de LLM                               | Proposta |
-| [0010](0010-janela-de-conversa-24h.md) | Regra da conversa (janela de 24h por contato) | Aceita   |
-| [0011](0011-regra-de-cota.md)          | Regra de cota                                 | Proposta |
-| [0012](0012-pacote-whatsapp.md)        | Pacote `@megabot/whatsapp`                    | Aceita   |
+| Nº                                          | Decisão                                       | Status   |
+| ------------------------------------------- | --------------------------------------------- | -------- |
+| [0001](0001-autenticacao.md)                | Provedor de autenticação (Better Auth)        | Aceita   |
+| [0002](0002-fundacoes-da-api.md)            | Fundações da API (Zod, pino, throttler, ...)  | Aceita   |
+| [0003](0003-nestjs-com-typescript.md)       | NestJS com TypeScript                         | Aceita   |
+| [0004](0004-prisma-e-postgresql.md)         | Prisma + PostgreSQL com RLS                   | Aceita   |
+| [0005](0005-pg-boss-para-filas.md)          | pg-boss para filas e jobs                     | Aceita   |
+| [0006](0006-node-test-para-testes.md)       | node:test para testes                         | Aceita   |
+| [0007](0007-cobranca.md)                    | Cobrança (Asaas)                              | Proposta |
+| [0008](0008-hospedagem.md)                  | Hospedagem                                    | Pendente |
+| [0009](0009-provedor-de-llm.md)             | Provedor de LLM                               | Proposta |
+| [0010](0010-janela-de-conversa-24h.md)      | Regra da conversa (janela de 24h por contato) | Aceita   |
+| [0011](0011-regra-de-cota.md)               | Regra de cota                                 | Proposta |
+| [0012](0012-pacote-whatsapp.md)             | Pacote `@megabot/whatsapp`                    | Aceita   |
+| [0013](0013-webhook-de-entrada-whatsapp.md) | Webhook de entrada do WhatsApp                | Aceita   |
 
 ## Status
 

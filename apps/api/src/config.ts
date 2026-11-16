@@ -33,6 +33,11 @@ export interface AppConfig {
   trustProxy: boolean | number | string;
   /** Expõe a documentação interativa em /docs. Desligada por padrão em produção. */
   swaggerEnabled: boolean;
+  /**
+   * Webhook do WhatsApp (app da Meta). Sem `appSecret` o POST responde 503; sem `verifyToken`
+   * o GET de verificação responde 403. Em produção os dois são obrigatórios.
+   */
+  whatsapp: { appSecret: string | undefined; verifyToken: string | undefined };
 }
 
 /** Erro lançado quando a configuração é inválida. A mensagem já vem formatada para o terminal. */
@@ -84,6 +89,9 @@ const envSchema = z
     TRUST_PROXY: z.string().default('false'),
 
     SWAGGER_ENABLED: z.enum(['true', 'false']).optional(),
+
+    WHATSAPP_APP_SECRET: z.string().optional(),
+    WHATSAPP_VERIFY_TOKEN: z.string().min(8, 'precisa ter pelo menos 8 caracteres').optional(),
   })
   .superRefine((env, ctx) => {
     if (Boolean(env.GOOGLE_CLIENT_ID) !== Boolean(env.GOOGLE_CLIENT_SECRET)) {
@@ -96,7 +104,12 @@ const envSchema = z
     }
     // Em produção não aceitamos "adivinhar" endereços: tudo explícito.
     if (env.NODE_ENV === 'production') {
-      for (const key of ['BETTER_AUTH_URL', 'WEB_URL'] as const) {
+      for (const key of [
+        'BETTER_AUTH_URL',
+        'WEB_URL',
+        'WHATSAPP_APP_SECRET',
+        'WHATSAPP_VERIFY_TOKEN',
+      ] as const) {
         if (!env[key]) {
           ctx.addIssue({ code: 'custom', path: [key], message: 'obrigatória em produção' });
         }
@@ -157,5 +170,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     },
     trustProxy: parseTrustProxy(e.TRUST_PROXY),
     swaggerEnabled: e.SWAGGER_ENABLED ? e.SWAGGER_ENABLED === 'true' : e.NODE_ENV !== 'production',
+    whatsapp: { appSecret: e.WHATSAPP_APP_SECRET, verifyToken: e.WHATSAPP_VERIFY_TOKEN },
   };
 }
