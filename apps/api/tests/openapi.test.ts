@@ -9,7 +9,14 @@ describe('Contrato OpenAPI', () => {
     const spec = await generateOpenApiSpec();
 
     assert.equal(spec.openapi.startsWith('3.'), true);
-    for (const route of ['/health', '/health/ready', '/me', '/webhooks/whatsapp']) {
+    for (const route of [
+      '/health',
+      '/health/ready',
+      '/me',
+      '/webhooks/whatsapp',
+      '/admin/queues',
+      '/admin/queues/{name}/jobs',
+    ]) {
       assert.ok(spec.paths[route], `${route} ausente no contrato`);
     }
 
@@ -21,10 +28,15 @@ describe('Contrato OpenAPI', () => {
         .sort(),
       [
         'ErrorResponseDto',
+        'JobSummaryDto',
         'LivenessResponseDto',
         'MeResponseDto',
         'MeTenantDto',
         'MeUserDto',
+        'QueueConfigDto',
+        'QueueCountsDto',
+        'QueueOverviewDto',
+        'QueuesSnapshotDto',
         'ReadinessResponseDto',
         'WebhookAckDto',
       ],

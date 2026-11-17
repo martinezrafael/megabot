@@ -15,7 +15,7 @@ export default async function AuthenticatedLayout({ children }: { children: Reac
   if (!me) redirect('/sign-in');
 
   return (
-    <AppShell me={me} nav={<AppNav />} actions={<SignOutButton />}>
+    <AppShell me={me} nav={<AppNav platformAdmin={me.platformAdmin} />} actions={<SignOutButton />}>
       {children}
     </AppShell>
   );

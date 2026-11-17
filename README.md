@@ -131,22 +131,33 @@ WEBHOOK_BASE_URL=https://abcd-123.ngrok-free.app
 
 Para o WhatsApp, o passo a passo completo (variáveis, cadastro na Meta e como ligar o seu número a um tenant) está em [docs/api/whatsapp-webhook.md](docs/api/whatsapp-webhook.md).
 
+### Filas e worker (T1.3)
+
+O `pnpm dev` também sobe o **worker** (`apps/worker`), que executa as filas do pg-boss. Para ver tudo funcionando:
+
+1. Coloque o seu e-mail em `PLATFORM_ADMIN_EMAILS` no `.env` e reinicie o `pnpm dev`.
+2. Rode `pnpm --filter @megabot/worker queue:smoke` (enfileira 3 jobs de teste: um OK, um que falha e repete, um que vai direto para a DLQ).
+3. Entre logado em `http://localhost:3001/admin/queues` (link **Filas** no menu).
+
+Detalhes: [packages/queue/README.md](packages/queue/README.md) e [ADR 0014](docs/adr/0014-filas-e-worker.md).
+
 ---
 
 ## 🛠️ Comandos Úteis
 
-| Comando            | Descrição                                                      |
-| ------------------ | -------------------------------------------------------------- |
-| `pnpm dev`         | Inicia todos os serviços do monorepo em modo dev               |
-| `pnpm build`       | Gera o build de produção de todos os apps e packages           |
-| `pnpm test`        | Executa os testes (inclui o teste de isolamento entre tenants) |
-| `pnpm lint`        | Executa a verificação do ESLint em todo o workspace            |
-| `pnpm typecheck`   | Executa a checagem de tipos do TypeScript                      |
-| `pnpm format`      | Formata todo o código do repositório via Prettier              |
-| `pnpm db:up`       | Sobe o container do PostgreSQL (`pgvector`)                    |
-| `pnpm db:down`     | Encerra o container do banco de dados                          |
-| `pnpm db:logs`     | Exibe os logs do container do banco em tempo real              |
-| `pnpm db:reset`    | Destrói o banco, limpa os volumes e sobe uma instância limpa   |
-| `pnpm db:generate` | Gera o Prisma Client                                           |
-| `pnpm db:migrate`  | Aplica as migrations pendentes                                 |
-| `pnpm tunnel`      | Abre o túnel do ngrok na porta `3000` para testes de webhook   |
+| Comando                                     | Descrição                                                       |
+| ------------------------------------------- | --------------------------------------------------------------- |
+| `pnpm dev`                                  | Inicia todos os serviços do monorepo em modo dev                |
+| `pnpm build`                                | Gera o build de produção de todos os apps e packages            |
+| `pnpm test`                                 | Executa os testes (inclui o teste de isolamento entre tenants)  |
+| `pnpm lint`                                 | Executa a verificação do ESLint em todo o workspace             |
+| `pnpm typecheck`                            | Executa a checagem de tipos do TypeScript                       |
+| `pnpm format`                               | Formata todo o código do repositório via Prettier               |
+| `pnpm db:up`                                | Sobe o container do PostgreSQL (`pgvector`)                     |
+| `pnpm db:down`                              | Encerra o container do banco de dados                           |
+| `pnpm db:logs`                              | Exibe os logs do container do banco em tempo real               |
+| `pnpm db:reset`                             | Destrói o banco, limpa os volumes e sobe uma instância limpa    |
+| `pnpm db:generate`                          | Gera o Prisma Client                                            |
+| `pnpm db:migrate`                           | Aplica as migrations pendentes                                  |
+| `pnpm tunnel`                               | Abre o túnel do ngrok na porta `3000` para testes de webhook    |
+| `pnpm --filter @megabot/worker queue:smoke` | Enfileira jobs de teste (ok, falha com retry, falha definitiva) |

@@ -7,6 +7,7 @@ import type { Me } from '../src/lib/me';
 const ME: Me = {
   user: { id: 'u1', email: 'ana@exemplo.com', name: 'Ana Souza', image: null, emailVerified: true },
   tenant: { id: 't1', role: 'OWNER' },
+  platformAdmin: false,
 };
 
 function render(me: Me) {

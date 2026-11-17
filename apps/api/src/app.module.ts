@@ -1,6 +1,8 @@
 import { type DynamicModule, Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { AdminModule } from './admin/admin.module';
+import type { QueueInspectorPort } from './admin/admin-queues.service';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
 import type { AppConfig } from './config';
 import { AppConfigModule } from './config.module';
@@ -23,6 +25,8 @@ export interface AppModuleOptions {
   logStream?: DestinationStream;
   /** Troca o ping do banco usado no readiness (testes). */
   dbPing?: DbPing;
+  /** Troca o leitor das tabelas do pg-boss usado na tela de filas (testes). */
+  queueInspector?: QueueInspectorPort;
 }
 
 @Module({})
@@ -39,6 +43,7 @@ export class AppModule {
         AuthModule.register(options),
         HealthModule.register({ ping: options.dbPing }),
         MeModule,
+        AdminModule.register({ inspector: options.queueInspector }),
         WhatsappWebhookModule,
       ],
       providers: [

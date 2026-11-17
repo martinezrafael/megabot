@@ -35,4 +35,10 @@ export class MeResponseDto {
     description: 'Primeiro (mais antigo) tenant do usuário',
   })
   tenant!: MeTenantDto | null;
+
+  @ApiProperty({
+    type: Boolean,
+    description: 'Administrador da plataforma (equipe Megabot): vê a tela de filas',
+  })
+  platformAdmin!: boolean;
 }
