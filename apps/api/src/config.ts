@@ -29,6 +29,13 @@ export interface AppConfig {
     /** Máximo por IP na janela para rotas de autenticação (login, cadastro, reset...). */
     authMax: number;
   };
+  /** URL do Postgres (a mesma do Prisma). A tela de filas lê as tabelas do pg-boss por ela. */
+  databaseUrl: string;
+  /**
+   * E-mails dos administradores da PLATAFORMA (equipe Megabot): únicos que enxergam a tela de filas,
+   * que mostra jobs de todas as empresas. Não é o papel ADMIN de uma empresa. Lista vazia = ninguém.
+   */
+  platformAdminEmails: string[];
   /** Valor do `trust proxy` do Express (necessário para enxergar o IP real atrás de um proxy). */
   trustProxy: boolean | number | string;
   /** Expõe a documentação interativa em /docs. Desligada por padrão em produção. */
@@ -89,6 +96,19 @@ const envSchema = z
     TRUST_PROXY: z.string().default('false'),
 
     SWAGGER_ENABLED: z.enum(['true', 'false']).optional(),
+
+    PLATFORM_ADMIN_EMAILS: z
+      .string()
+      .optional()
+      .transform((value) =>
+        (value ?? '')
+          .split(',')
+          .map((email) => email.trim().toLowerCase())
+          .filter(Boolean),
+      )
+      .refine((emails) => emails.every((email) => z.email().safeParse(email).success), {
+        error: 'precisa ser uma lista de e-mails separados por vírgula',
+      }),
 
     WHATSAPP_APP_SECRET: z.string().optional(),
     WHATSAPP_VERIFY_TOKEN: z.string().min(8, 'precisa ter pelo menos 8 caracteres').optional(),
@@ -168,6 +188,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       max: e.RATE_LIMIT_MAX,
       authMax: e.RATE_LIMIT_AUTH_MAX,
     },
+    databaseUrl: e.DATABASE_URL,
+    platformAdminEmails: e.PLATFORM_ADMIN_EMAILS,
     trustProxy: parseTrustProxy(e.TRUST_PROXY),
     swaggerEnabled: e.SWAGGER_ENABLED ? e.SWAGGER_ENABLED === 'true' : e.NODE_ENV !== 'production',
     whatsapp: { appSecret: e.WHATSAPP_APP_SECRET, verifyToken: e.WHATSAPP_VERIFY_TOKEN },

@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@megabot/database": "workspace:*",
+    "@megabot/queue": "workspace:*",
     "@megabot/whatsapp": "workspace:*",
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",

@@ -3,7 +3,27 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build": "echo 'Build do Worker'",
-    "start": "node index.js"
+    "dev": "tsx watch --env-file=../../.env src/main.ts",
+    "build": "swc src -d dist --strip-leading-paths --config-file ../../packages/config/swc/.swcrc -C module.type=commonjs",
+    "start": "node dist/main.js",
+    "queue:smoke": "tsx --env-file=../../.env scripts/queue-smoke.ts",
+    "lint": "eslint .",
+    "check-types": "tsc --noEmit",
+    "test": "node --env-file=../../.env --import tsx --test --test-concurrency=1 \"tests/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@megabot/queue": "workspace:*",
+    "pino": "^10.4.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@megabot/eslint-config": "workspace:*",
+    "@megabot/tsconfig": "workspace:*",
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.23.1",
+    "pg": "^8.23.1",
+    "pino-pretty": "^13.2.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.0.0"
   }
 }

@@ -1,0 +1,27 @@
+{
+  "name": "@megabot/queue",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Filas de tarefas (pg-boss): definição das filas, retentativas, fila de falhas (DLQ) e leitura para o admin",
+  "main": "./dist/index.js",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "swc src -d dist --strip-leading-paths --config-file ../config/swc/.swcrc -C module.type=commonjs",
+    "lint": "eslint .",
+    "check-types": "tsc --noEmit",
+    "test": "node --env-file=../../.env --import tsx --test --test-concurrency=1 \"tests/**/*.test.ts\""
+  },
+  "dependencies": {
+    "pg": "^8.23.1",
+    "pg-boss": "12.38.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@megabot/eslint-config": "workspace:*",
+    "@megabot/tsconfig": "workspace:*",
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.23.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.0.0"
+  }
+}

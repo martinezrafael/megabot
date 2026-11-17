@@ -20,6 +20,7 @@ um arquivo curto, versionado junto com o código, que explica **o que** foi deci
 | [0011](0011-regra-de-cota.md)               | Regra de cota                                 | Proposta |
 | [0012](0012-pacote-whatsapp.md)             | Pacote `@megabot/whatsapp`                    | Aceita   |
 | [0013](0013-webhook-de-entrada-whatsapp.md) | Webhook de entrada do WhatsApp                | Aceita   |
+| [0014](0014-filas-e-worker.md)              | Filas, retentativas, DLQ e worker             | Aceita   |
 
 ## Status
 

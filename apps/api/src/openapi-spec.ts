@@ -15,6 +15,8 @@ const SPEC_CONFIG: AppConfig = {
   smtp: { host: 'localhost', port: 1025, from: 'spec@megabot.local' },
   logLevel: 'silent',
   rateLimit: { windowMs: 60_000, max: 1000, authMax: 1000 },
+  databaseUrl: 'postgresql://spec:spec@localhost:5432/spec',
+  platformAdminEmails: [],
   trustProxy: false,
   swaggerEnabled: false,
   whatsapp: { appSecret: undefined, verifyToken: undefined },

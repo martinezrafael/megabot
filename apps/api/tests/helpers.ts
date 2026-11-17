@@ -6,6 +6,7 @@ import { createApp } from '../src/bootstrap';
 import type { AppConfig } from '../src/config';
 import type { DestinationStream } from 'pino';
 import { createMemoryMailer, type Mailer } from '../src/mailer';
+import type { QueueInspectorPort } from '../src/admin/admin-queues.service';
 
 export const WEB_URL = 'http://localhost:3001';
 
@@ -55,6 +56,10 @@ export function createTestConfig(port: number, overrides: Partial<AppConfig> = {
     smtp: { host: 'localhost', port: 1025, from: 'test@megabot.local' },
     logLevel: 'silent',
     rateLimit: { windowMs: 60_000, max: 10_000, authMax: 10_000 },
+    databaseUrl:
+      process.env.DATABASE_URL ??
+      'postgresql://megabot_app:megabot_pass@localhost:5432/megabot?schema=public',
+    platformAdminEmails: [],
     trustProxy: false,
     swaggerEnabled: false,
     whatsapp: { appSecret: undefined, verifyToken: undefined },
@@ -67,33 +72,41 @@ export interface StartTestAppOptions {
   config?: Partial<AppConfig>;
   logStream?: DestinationStream;
   dbPing?: () => Promise<unknown>;
+  /** Troca o leitor das tabelas do pg-boss (tela de filas). */
+  queueInspector?: QueueInspectorPort;
+  /** Rótulos (como em `newEmail`) cujos e-mails serão administradores da plataforma. */
+  platformAdminLabels?: string[];
 }
 
 export async function startTestApp(options: StartTestAppOptions = {}): Promise<TestApp> {
   const port = await freePort();
   const baseUrl = `http://localhost:${port}`;
-  const config = createTestConfig(port, options.config);
+  const run = randomUUID().slice(0, 8);
+  const emails: string[] = [];
+  const emailFor = (label: string) => {
+    const email = `${label}-${run}@auth.test`;
+    if (!emails.includes(email)) emails.push(email);
+    return email;
+  };
+  const config = createTestConfig(port, {
+    platformAdminEmails: (options.platformAdminLabels ?? []).map(emailFor),
+    ...options.config,
+  });
   const mailer = createMemoryMailer();
   const app = await createApp({
     config,
     mailer: options.mailer ?? mailer,
     logStream: options.logStream,
     dbPing: options.dbPing,
+    queueInspector: options.queueInspector,
   });
   await app.listen(port);
-
-  const run = randomUUID().slice(0, 8);
-  const emails: string[] = [];
 
   return {
     baseUrl,
     mailer,
     app,
-    newEmail: (label) => {
-      const email = `${label}-${run}@auth.test`;
-      emails.push(email);
-      return email;
-    },
+    newEmail: emailFor,
     api: (path, init = {}) =>
       fetch(`${baseUrl}${path}`, {
         method: init.method ?? (init.body || init.rawBody ? 'POST' : 'GET'),
@@ -145,4 +158,15 @@ export async function waitForEmail(mailer: TestApp['mailer'], to: string, timeou
     await new Promise((r) => setTimeout(r, 25));
   }
   throw new Error(`Timeout esperando e-mail para ${to}`);
+}
+
+/** Cadastra, verifica o e-mail e devolve o cookie de uma sessão válida. */
+export async function signUpVerified(t: TestApp, email: string, name = 'Teste'): Promise<string> {
+  const signUp = await t.api('/api/auth/sign-up/email', {
+    body: { name, email, password: 'senha-super-segura-123', callbackURL: `${WEB_URL}/dashboard` },
+  });
+  if (signUp.status !== 200) throw new Error(`cadastro falhou: ${signUp.status}`);
+  await waitForEmail(t.mailer, email);
+  const verify = await t.api(lastLink(t.mailer, email).replace(t.baseUrl, ''));
+  return cookieFrom(verify);
 }

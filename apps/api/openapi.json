@@ -44,6 +44,93 @@
         ],
         "type": "object"
       },
+      "JobSummaryDto": {
+        "properties": {
+          "completedAt": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "errorMessage": {
+            "description": "Mensagem do erro (truncada). O payload do job nunca é exposto.",
+            "nullable": true,
+            "type": "string"
+          },
+          "errorName": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "queue": {
+            "type": "string"
+          },
+          "retryCount": {
+            "type": "number"
+          },
+          "retryLimit": {
+            "type": "number"
+          },
+          "sourceJobId": {
+            "description": "DLQ: id do job original",
+            "nullable": true,
+            "type": "string"
+          },
+          "sourceQueue": {
+            "description": "DLQ: fila de onde o job veio",
+            "nullable": true,
+            "type": "string"
+          },
+          "startAfter": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "startedAt": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "created",
+              "retry",
+              "active",
+              "completed",
+              "cancelled",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "tenantId": {
+            "description": "Empresa dona do job",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "queue",
+          "state",
+          "tenantId",
+          "retryCount",
+          "retryLimit",
+          "createdAt",
+          "startAfter",
+          "startedAt",
+          "completedAt",
+          "sourceQueue",
+          "sourceJobId",
+          "errorName",
+          "errorMessage"
+        ],
+        "type": "object"
+      },
       "LivenessResponseDto": {
         "properties": {
           "status": {
@@ -58,6 +145,10 @@
       },
       "MeResponseDto": {
         "properties": {
+          "platformAdmin": {
+            "description": "Administrador da plataforma (equipe Megabot): vê a tela de filas",
+            "type": "boolean"
+          },
           "tenant": {
             "allOf": [
               {
@@ -74,7 +165,8 @@
         },
         "required": [
           "user",
-          "tenant"
+          "tenant",
+          "platformAdmin"
         ],
         "type": "object"
       },
@@ -129,6 +221,150 @@
           "name",
           "image",
           "emailVerified"
+        ],
+        "type": "object"
+      },
+      "QueueConfigDto": {
+        "properties": {
+          "expireInSeconds": {
+            "description": "Tempo máximo de uma execução",
+            "type": "number"
+          },
+          "retryBackoff": {
+            "description": "Espera exponencial entre tentativas",
+            "type": "boolean"
+          },
+          "retryDelayMaxSeconds": {
+            "nullable": true,
+            "type": "number"
+          },
+          "retryDelaySeconds": {
+            "type": "number"
+          },
+          "retryLimit": {
+            "description": "Retentativas depois da primeira execução",
+            "type": "number"
+          }
+        },
+        "required": [
+          "retryLimit",
+          "retryDelaySeconds",
+          "retryBackoff",
+          "retryDelayMaxSeconds",
+          "expireInSeconds"
+        ],
+        "type": "object"
+      },
+      "QueueCountsDto": {
+        "properties": {
+          "active": {
+            "description": "Em execução agora",
+            "type": "number"
+          },
+          "cancelled": {
+            "type": "number"
+          },
+          "completed": {
+            "type": "number"
+          },
+          "created": {
+            "description": "Esperando para executar (inclui agendados)",
+            "type": "number"
+          },
+          "deferred": {
+            "description": "Parte de \"created\" agendada para o futuro",
+            "type": "number"
+          },
+          "failed": {
+            "description": "Falhou de vez (foi para a DLQ, se houver)",
+            "type": "number"
+          },
+          "retry": {
+            "description": "Falhou e aguarda a próxima tentativa",
+            "type": "number"
+          }
+        },
+        "required": [
+          "created",
+          "retry",
+          "active",
+          "completed",
+          "cancelled",
+          "failed",
+          "deferred"
+        ],
+        "type": "object"
+      },
+      "QueueOverviewDto": {
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/QueueConfigDto"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/QueueCountsDto"
+          },
+          "deadLetterName": {
+            "example": "whatsapp.inbound.dlq",
+            "nullable": true,
+            "type": "string"
+          },
+          "isDeadLetter": {
+            "description": "Fila de falhas (DLQ)",
+            "type": "boolean"
+          },
+          "lastCompletedAt": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "lastFailedAt": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "example": "whatsapp.inbound",
+            "type": "string"
+          },
+          "oldestWaitingSeconds": {
+            "description": "Há quantos segundos o job pronto mais antigo espera (null = ninguém esperando)",
+            "nullable": true,
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "isDeadLetter",
+          "deadLetterName",
+          "config",
+          "counts",
+          "oldestWaitingSeconds",
+          "lastCompletedAt",
+          "lastFailedAt"
+        ],
+        "type": "object"
+      },
+      "QueuesSnapshotDto": {
+        "properties": {
+          "generatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "installed": {
+            "description": "false = o worker ainda não criou as tabelas do pg-boss",
+            "type": "boolean"
+          },
+          "queues": {
+            "items": {
+              "$ref": "#/components/schemas/QueueOverviewDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "installed",
+          "generatedAt",
+          "queues"
         ],
         "type": "object"
       },
@@ -284,6 +520,166 @@
   },
   "openapi": "3.0.0",
   "paths": {
+    "/admin/queues": {
+      "get": {
+        "operationId": "AdminQueuesController_overview",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueuesSnapshotDto"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Sem sessão válida"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Não é administrador da plataforma"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Resumo de todas as filas (e DLQs) com a contagem de jobs por estado",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/queues/{name}/jobs": {
+      "get": {
+        "operationId": "AdminQueuesController_jobs",
+        "parameters": [
+          {
+            "description": "1 a 100 (padrão 25)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tenantId",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "enum": [
+                "created",
+                "retry",
+                "active",
+                "completed",
+                "cancelled",
+                "failed"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "example": "whatsapp.inbound.dlq",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/JobSummaryDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Filtro inválido"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Sem sessão válida"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Não é administrador da plataforma"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Fila inexistente"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Jobs mais recentes de uma fila (sem o payload)",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/auth/callback/{id}": {
       "get": {
         "parameters": [

@@ -5,6 +5,7 @@ import { fetchMe, safeNext } from '../src/lib/me';
 const ME = {
   user: { id: 'u1', email: 'ana@exemplo.com', name: 'Ana', image: null, emailVerified: true },
   tenant: { id: 't1', role: 'OWNER' as const },
+  platformAdmin: false,
 };
 
 function stubFetch(response: Response) {

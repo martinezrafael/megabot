@@ -1,5 +1,6 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Inject } from '@nestjs/common';
 import { ApiCookieAuth, ApiOkResponse, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { PlatformAdminService } from '../admin/platform-admin.service';
 import { type AuthContext, CurrentAuth } from '../auth/auth.context';
 import { ErrorResponseDto } from '../common/error-response.dto';
 import { MeResponseDto } from './me.dto';
@@ -8,6 +9,8 @@ import { MeResponseDto } from './me.dto';
 @ApiCookieAuth('session')
 @Controller()
 export class MeController {
+  constructor(@Inject(PlatformAdminService) private readonly admins: PlatformAdminService) {}
+
   /** Devolve quem está logado e a qual empresa (tenant) pertence. */
   @Get('me')
   @ApiOperation({ summary: 'Usuário logado e seu tenant' })
@@ -22,6 +25,7 @@ export class MeController {
     return {
       user: { ...auth.user, image: auth.user.image ?? null },
       tenant: auth.tenantId && auth.role ? { id: auth.tenantId, role: auth.role } : null,
+      platformAdmin: this.admins.isPlatformAdmin(auth),
     };
   }
 }

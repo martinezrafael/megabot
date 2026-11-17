@@ -17,5 +17,5 @@ export function middleware(request: NextRequest) {
 
 // Toda rota nova dentro de app/(app)/ deve ser listada aqui.
 export const config = {
-  matcher: ['/dashboard/:path*', '/settings/:path*'],
+  matcher: ['/dashboard/:path*', '/settings/:path*', '/admin/:path*'],
 };

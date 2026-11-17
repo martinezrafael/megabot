@@ -4,6 +4,40 @@
  */
 
 export interface paths {
+    "/admin/queues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Resumo de todas as filas (e DLQs) com a contagem de jobs por estado */
+        get: operations["AdminQueuesController_overview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/queues/{name}/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Jobs mais recentes de uma fila (sem o payload) */
+        get: operations["AdminQueuesController_jobs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/callback/{id}": {
         parameters: {
             query?: never;
@@ -570,11 +604,39 @@ export interface components {
             /** Format: date-time */
             timestamp: string;
         };
+        JobSummaryDto: {
+            /** Format: date-time */
+            completedAt: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** @description Mensagem do erro (truncada). O payload do job nunca é exposto. */
+            errorMessage: string | null;
+            errorName: string | null;
+            /** Format: uuid */
+            id: string;
+            queue: string;
+            retryCount: number;
+            retryLimit: number;
+            /** @description DLQ: id do job original */
+            sourceJobId: string | null;
+            /** @description DLQ: fila de onde o job veio */
+            sourceQueue: string | null;
+            /** Format: date-time */
+            startAfter: string;
+            /** Format: date-time */
+            startedAt: string | null;
+            /** @enum {string} */
+            state: "created" | "retry" | "active" | "completed" | "cancelled" | "failed";
+            /** @description Empresa dona do job */
+            tenantId: string | null;
+        };
         LivenessResponseDto: {
             /** @example ok */
             status: string;
         };
         MeResponseDto: {
+            /** @description Administrador da plataforma (equipe Megabot): vê a tela de filas */
+            platformAdmin: boolean;
             /** @description Primeiro (mais antigo) tenant do usuário */
             tenant: components["schemas"]["MeTenantDto"] | null;
             user: components["schemas"]["MeUserDto"];
@@ -598,6 +660,53 @@ export interface components {
             image: string | null;
             /** @example Ana Souza */
             name: string;
+        };
+        QueueConfigDto: {
+            /** @description Tempo máximo de uma execução */
+            expireInSeconds: number;
+            /** @description Espera exponencial entre tentativas */
+            retryBackoff: boolean;
+            retryDelayMaxSeconds: number | null;
+            retryDelaySeconds: number;
+            /** @description Retentativas depois da primeira execução */
+            retryLimit: number;
+        };
+        QueueCountsDto: {
+            /** @description Em execução agora */
+            active: number;
+            cancelled: number;
+            completed: number;
+            /** @description Esperando para executar (inclui agendados) */
+            created: number;
+            /** @description Parte de "created" agendada para o futuro */
+            deferred: number;
+            /** @description Falhou de vez (foi para a DLQ, se houver) */
+            failed: number;
+            /** @description Falhou e aguarda a próxima tentativa */
+            retry: number;
+        };
+        QueueOverviewDto: {
+            config: components["schemas"]["QueueConfigDto"];
+            counts: components["schemas"]["QueueCountsDto"];
+            /** @example whatsapp.inbound.dlq */
+            deadLetterName: string | null;
+            /** @description Fila de falhas (DLQ) */
+            isDeadLetter: boolean;
+            /** Format: date-time */
+            lastCompletedAt: string | null;
+            /** Format: date-time */
+            lastFailedAt: string | null;
+            /** @example whatsapp.inbound */
+            name: string;
+            /** @description Há quantos segundos o job pronto mais antigo espera (null = ninguém esperando) */
+            oldestWaitingSeconds: number | null;
+        };
+        QueuesSnapshotDto: {
+            /** Format: date-time */
+            generatedAt: string;
+            /** @description false = o worker ainda não criou as tabelas do pg-boss */
+            installed: boolean;
+            queues: components["schemas"]["QueueOverviewDto"][];
         };
         ReadinessResponseDto: {
             /**
@@ -667,6 +776,105 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    AdminQueuesController_overview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueuesSnapshotDto"];
+                };
+            };
+            /** @description Sem sessão válida */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Não é administrador da plataforma */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+        };
+    };
+    AdminQueuesController_jobs: {
+        parameters: {
+            query?: {
+                /** @description 1 a 100 (padrão 25) */
+                limit?: number;
+                tenantId?: string;
+                state?: "created" | "retry" | "active" | "completed" | "cancelled" | "failed";
+            };
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobSummaryDto"][];
+                };
+            };
+            /** @description Filtro inválido */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Sem sessão válida */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Não é administrador da plataforma */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Fila inexistente */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+        };
+    };
     getSession: {
         parameters: {
             query?: {
