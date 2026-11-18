@@ -22,6 +22,7 @@ model Tenant {
   members             Membership[]
   whatsappConnections WhatsappConnection[]
   webhookEvents       WebhookEvent[]
+  contacts            Contact[]
 
   @@map("tenants")
 }
@@ -155,4 +156,82 @@ model WebhookEvent {
   @@index([tenantId, processStatus, receivedAt])
   @@index([tenantId, wamid])
   @@map("webhook_events")
+}
+
+// ---------------------------------------------------------------------------
+// Conversas (T1.4). Todas com RLS (ver migration *_conversations).
+// Regra (ADR 0010/0011): uma "conversa" é UMA janela de atendimento de 24h de um contato.
+// O índice parcial "no máximo 1 conversa `open` por contato" só existe no SQL da migration.
+// ---------------------------------------------------------------------------
+
+/// Quem conversa com o tenant. `waId` = número do WhatsApp só com dígitos (E.164 sem "+").
+model Contact {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  waId        String   @map("wa_id")
+  profileName String?  @map("profile_name")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+  messages      Message[]
+
+  @@unique([tenantId, waId])
+  @@unique([tenantId, id])
+  @@map("contacts")
+}
+
+/// Uma janela de 24h. `status` ∈ open | expired (CHECK no banco). `windowExpiresAt` = última
+/// mensagem RECEBIDA + 24h. Quem expira uma janela aberta é a varredura (ou a próxima mensagem).
+model Conversation {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  contactId       String    @map("contact_id") @db.Uuid
+  status          String    @default("open")
+  windowStartedAt DateTime  @map("window_started_at") @db.Timestamptz(6)
+  windowExpiresAt DateTime  @map("window_expires_at") @db.Timestamptz(6)
+  lastInboundAt   DateTime  @map("last_inbound_at") @db.Timestamptz(6)
+  expiredAt       DateTime? @map("expired_at") @db.Timestamptz(6)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  contact  Contact   @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: Cascade)
+  messages Message[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId, contactId, windowStartedAt])
+  @@index([tenantId, status, windowExpiresAt])
+  @@map("conversations")
+}
+
+/// Mensagem recebida (`direction = inbound`, `sender = contact`) ou enviada (`bot` | `agent`).
+/// `wamid` é único por tenant. `sentAt` = hora da Meta (recebidas) ou do envio (enviadas).
+model Message {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  contactId      String    @map("contact_id") @db.Uuid
+  conversationId String?   @map("conversation_id") @db.Uuid
+  direction      String
+  sender         String
+  type           String
+  body           String?
+  content        Json?
+  wamid          String?
+  status         String
+  errorCode      String?   @map("error_code")
+  errorMessage   String?   @map("error_message")
+  sentAt         DateTime  @map("sent_at") @db.Timestamptz(6)
+  deliveredAt    DateTime? @map("delivered_at") @db.Timestamptz(6)
+  readAt         DateTime? @map("read_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  contact      Contact       @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [tenantId, conversationId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, wamid])
+  @@index([tenantId, conversationId, sentAt])
+  @@index([tenantId, contactId, sentAt])
+  @@map("messages")
 }

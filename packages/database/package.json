@@ -13,7 +13,7 @@
     "whatsapp:connect": "tsx --env-file=../../.env scripts/connect-whatsapp-number.ts",
     "lint": "eslint .",
     "check-types": "tsc --noEmit",
-    "test": "node --env-file=../../.env --import tsx --test --test-concurrency=1 tests/**/*.test.ts"
+    "test": "node --env-file=../../.env --import tsx --test --test-concurrency=1 \"tests/**/*.test.ts\""
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.1",
