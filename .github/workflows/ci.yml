@@ -84,6 +84,13 @@ jobs:
         run: pnpm test
 
       # Os rollbacks devem ser aplicados na ORDEM INVERSA das migrations.
+      - name: Verify conversations migration rollback
+        run: |
+          psql "$APP_PG_URL" -v ON_ERROR_STOP=1 \
+            -f packages/database/prisma/migrations/20261117180000_conversations/rollback.sql
+          TABLES=$(psql "$APP_PG_URL" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_name IN ('contacts','conversations','messages')")
+          test "$TABLES" = "0"
+
       - name: Verify WhatsApp webhook migration rollback
         run: |
           psql "$APP_PG_URL" -v ON_ERROR_STOP=1 \

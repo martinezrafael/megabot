@@ -9,6 +9,43 @@ Schema, migrations, cliente Prisma e isolamento multitenant via Row Level Securi
 - `memberships`: vínculo entre usuário e tenant (`role`: `OWNER`, `ADMIN` ou `MEMBER`). Tem RLS.
 - `whatsapp_connections`: qual número do WhatsApp (`phone_number_id`, único no sistema) pertence a qual tenant. Tem RLS.
 - `webhook_events`: caixa de entrada dos webhooks do WhatsApp, única por `(tenant_id, event_key)`. Tem RLS.
+- `contacts`: quem conversa com o tenant, único por `(tenant_id, wa_id)`. Tem RLS.
+- `conversations`: **uma janela de 24h** de um contato (`open` | `expired`). No máximo uma `open` por contato (índice parcial). Tem RLS.
+- `messages`: mensagens recebidas e enviadas, únicas por `(tenant_id, wamid)`. Tem RLS.
+
+### Conversas (T1.4)
+
+Repositórios em `src/conversations/` (todos usam `withTenant`; "agora" é parâmetro, nada de relógio global):
+
+```ts
+import {
+  recordInboundMessage,
+  prepareOutboundMessage,
+  applyStatusUpdate,
+  getContactWindow,
+} from '@megabot/database';
+
+// Mensagem recebida: abre/renova a janela e grava (reentrega do mesmo wamid é ignorada).
+const r = await recordInboundMessage(
+  tenantId,
+  { waId, wamid, type: 'text', body, sentAt },
+  { logger, metrics },
+);
+// r.window: opened (conta cota) | renewed | unchanged | late_attached | late_expired | duplicate
+
+// Antes de enviar (no worker): checa a janela NA HORA; fora dela lança WindowClosedError (não repetível).
+const out = await prepareOutboundMessage(tenantId, {
+  contactId,
+  sender: 'bot',
+  type: 'text',
+  body,
+});
+
+// Status da Meta (sent/delivered/read/failed): só avança; fora de ordem é ignorado.
+await applyStatusUpdate(tenantId, { wamid, status: 'delivered', at });
+```
+
+Regras completas: [ADR 0015](../../docs/adr/0015-modelo-de-conversas.md) e [ADR 0010](../../docs/adr/0010-janela-de-conversa-24h.md).
 
 > Decisão de escopo: `tenants` e `users` não têm RLS. Qualquer sessão com acesso ao banco consegue listá-las. Ao criar tabelas que pertencem a um tenant, siga o checklist da seção "Adicionando RLS a uma nova tabela".
 

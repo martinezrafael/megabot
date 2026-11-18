@@ -12,3 +12,4 @@ export {
   type StoreWebhookEventsResult,
   type WhatsappConnectionInfo,
 } from './whatsapp';
+export * from './conversations';
