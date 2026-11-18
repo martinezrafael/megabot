@@ -9,9 +9,11 @@
     "queue:smoke": "tsx --env-file=../../.env scripts/queue-smoke.ts",
     "lint": "eslint .",
     "check-types": "tsc --noEmit",
-    "test": "node --env-file=../../.env --import tsx --test --test-concurrency=1 \"tests/**/*.test.ts\""
+    "test": "node --env-file=../../.env --import tsx --test --test-concurrency=1 \"tests/**/*.test.ts\"",
+    "inbound:enqueue-pending": "tsx --env-file=../../.env scripts/enqueue-pending.ts"
   },
   "dependencies": {
+    "@megabot/database": "workspace:*",
     "@megabot/queue": "workspace:*",
     "pino": "^10.4.0",
     "zod": "^4.6.7"
