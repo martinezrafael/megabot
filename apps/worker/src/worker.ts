@@ -21,7 +21,7 @@ export async function startWorker(config: WorkerConfig, logger: Logger): Promise
 
   try {
     await client.start();
-    const queues = await registerHandlers(client, config);
+    const queues = await registerHandlers(client, config, logger);
     logger.info({ event: 'worker.ready', handlers: queues }, 'Worker pronto');
   } catch (error) {
     await client.stop({ timeoutMs: 1_000 }).catch(() => undefined);

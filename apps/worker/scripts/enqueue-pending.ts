@@ -1,5 +1,5 @@
 /**
- * Enfileira em `whatsapp.inbound` os eventos do webhook que ainda estão `pending` (só desenvolvimento).
+ * Enfileira em `whatsapp.inbound` (mensagens, erros) e `whatsapp.status` (status) os eventos do webhook que ainda estão `pending` (só desenvolvimento).
  *
  * Por quê: o webhook (T1.2) grava o evento no banco, mas ainda NÃO enfileira o job. Este script faz
  * essa ponte manualmente para você ver o job da T1.5 funcionando de ponta a ponta:
@@ -9,7 +9,7 @@
  *
  * Rodar duas vezes é seguro: o id do job é o id do evento, então não duplica.
  */
-import { listPendingWebhookEventIds, prisma } from '@megabot/database';
+import { listPendingWebhookEvents, prisma } from '@megabot/database';
 import { QUEUES, QueueClient } from '@megabot/queue';
 
 if (process.env.NODE_ENV === 'production') {
@@ -31,9 +31,11 @@ async function main(): Promise<void> {
     let enqueued = 0;
     let already = 0;
     for (const { id: tenantId } of tenants) {
-      for (const webhookEventId of await listPendingWebhookEventIds(tenantId)) {
+      for (const { id: webhookEventId, kind } of await listPendingWebhookEvents(tenantId)) {
+        // Status de mensagem enviada vai para a fila `whatsapp.status`; o resto, para `whatsapp.inbound`.
+        const queue = kind === 'status' ? QUEUES.whatsappStatus : QUEUES.whatsappInbound;
         const result = await client.enqueue(
-          QUEUES.whatsappInbound,
+          queue,
           { tenantId, webhookEventId },
           { jobId: webhookEventId },
         );

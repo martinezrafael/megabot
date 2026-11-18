@@ -66,6 +66,23 @@ const { trigger, reason } = decideAgentTrigger({
 
 O job que usa tudo isto está em `apps/worker/src/handlers/inbound-message.ts` ([ADR 0016](../../docs/adr/0016-job-inbound-message.md)).
 
+### Envio (T1.6)
+
+```ts
+import {
+  getOutboundMessageForSend,
+  findTenantWhatsappNumber,
+  takeWhatsappSendToken,
+} from '@megabot/database';
+
+const msg = await getOutboundMessageForSend(tenantId, messageId); // mensagem de saída + número (waId) do contato
+const number = await findTenantWhatsappNumber(tenantId); // { phoneNumberId, wabaId }
+const slot = await takeWhatsappSendToken(tenantId, number.phoneNumberId, { ratePerSecond: 80 });
+// { allowed: true } | { allowed: false, retryAfterMs }  (balde de fichas por número, vale para todos os workers)
+```
+
+A tabela `whatsapp_rate_limits` (uma linha por número, com RLS) guarda o balde. Quem usa tudo isto é o job `whatsapp.outbound` ([ADR 0017](../../docs/adr/0017-envio-e-status.md)).
+
 > Decisão de escopo: `tenants` e `users` não têm RLS. Qualquer sessão com acesso ao banco consegue listá-las. Ao criar tabelas que pertencem a um tenant, siga o checklist da seção "Adicionando RLS a uma nova tabela".
 
 ## Como o isolamento funciona

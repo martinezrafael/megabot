@@ -82,6 +82,17 @@ export const QUEUES = {
     keepCompletedSeconds: 3 * DAY,
   }),
 
+  /** Atualiza o status (sent, delivered, read, failed) de uma mensagem ENVIADA, vindo do webhook. */
+  whatsappStatus: defineQueue({
+    name: 'whatsapp.status',
+    description: 'Atualizar o status de entrega de uma mensagem enviada (evento de status).',
+    payload: z.object({ tenantId, webhookEventId: z.uuid() }),
+    retry: { retryLimit: 6, retryDelaySeconds: 5, retryDelayMaxSeconds: 10 * 60 },
+    expireInSeconds: 60,
+    concurrency: 5,
+    keepCompletedSeconds: 3 * DAY,
+  }),
+
   /** Envia uma mensagem pela Cloud API (o conteúdo fica no banco; o job só aponta para ele). */
   whatsappOutbound: defineQueue({
     name: 'whatsapp.outbound',
