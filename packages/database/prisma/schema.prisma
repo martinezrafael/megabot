@@ -25,6 +25,7 @@ model Tenant {
   conversationLimitPerMonth Int?           @map("conversation_limit_per_month")
   members             Membership[]
   whatsappConnections WhatsappConnection[]
+  whatsappRateLimits  WhatsappRateLimit[]
   webhookEvents       WebhookEvent[]
   contacts            Contact[]
 
@@ -135,6 +136,19 @@ model WhatsappConnection {
 
   @@index([tenantId])
   @@map("whatsapp_connections")
+}
+
+/// Balde de fichas do envio por número (T1.6): controla a vazão para não estourar o limite da Meta.
+model WhatsappRateLimit {
+  phoneNumberId String   @id @map("phone_number_id")
+  tenantId      String   @map("tenant_id") @db.Uuid
+  tokens        Float
+  refilledAt    DateTime @map("refilled_at") @db.Timestamptz(6)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("whatsapp_rate_limits")
 }
 
 /// Caixa de entrada dos webhooks. `eventKey` é único por tenant: reenvio da Meta não duplica.

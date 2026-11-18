@@ -7,13 +7,16 @@ export {
   findWhatsappConnectionByPhoneNumberId,
   getWebhookEvent,
   listPendingWebhookEventIds,
+  listPendingWebhookEvents,
   markWebhookEvent,
   registerWhatsappConnection,
   storeWebhookEvents,
   type NewWebhookEvent,
   type RegisterWhatsappConnectionInput,
+  type PendingWebhookEvent,
   type StoreWebhookEventsResult,
   type WebhookEventRecord,
   type WhatsappConnectionInfo,
 } from './whatsapp';
 export * from './conversations';
+export * from './outbound';

@@ -10,11 +10,13 @@
     "lint": "eslint .",
     "check-types": "tsc --noEmit",
     "test": "node --env-file=../../.env --import tsx --test --test-concurrency=1 \"tests/**/*.test.ts\"",
-    "inbound:enqueue-pending": "tsx --env-file=../../.env scripts/enqueue-pending.ts"
+    "inbound:enqueue-pending": "tsx --env-file=../../.env scripts/enqueue-pending.ts",
+    "outbound:send-test": "tsx --env-file=../../.env scripts/send-test.ts"
   },
   "dependencies": {
     "@megabot/database": "workspace:*",
     "@megabot/queue": "workspace:*",
+    "@megabot/whatsapp": "workspace:*",
     "pino": "^10.4.0",
     "zod": "^4.6.7"
   },

@@ -145,19 +145,21 @@ Detalhes: [packages/queue/README.md](packages/queue/README.md) e [ADR 0014](docs
 
 ## 🛠️ Comandos Úteis
 
-| Comando                                     | Descrição                                                       |
-| ------------------------------------------- | --------------------------------------------------------------- |
-| `pnpm dev`                                  | Inicia todos os serviços do monorepo em modo dev                |
-| `pnpm build`                                | Gera o build de produção de todos os apps e packages            |
-| `pnpm test`                                 | Executa os testes (inclui o teste de isolamento entre tenants)  |
-| `pnpm lint`                                 | Executa a verificação do ESLint em todo o workspace             |
-| `pnpm typecheck`                            | Executa a checagem de tipos do TypeScript                       |
-| `pnpm format`                               | Formata todo o código do repositório via Prettier               |
-| `pnpm db:up`                                | Sobe o container do PostgreSQL (`pgvector`)                     |
-| `pnpm db:down`                              | Encerra o container do banco de dados                           |
-| `pnpm db:logs`                              | Exibe os logs do container do banco em tempo real               |
-| `pnpm db:reset`                             | Destrói o banco, limpa os volumes e sobe uma instância limpa    |
-| `pnpm db:generate`                          | Gera o Prisma Client                                            |
-| `pnpm db:migrate`                           | Aplica as migrations pendentes                                  |
-| `pnpm tunnel`                               | Abre o túnel do ngrok na porta `3000` para testes de webhook    |
-| `pnpm --filter @megabot/worker queue:smoke` | Enfileira jobs de teste (ok, falha com retry, falha definitiva) |
+| Comando                                                                           | Descrição                                                           |
+| --------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `pnpm dev`                                                                        | Inicia todos os serviços do monorepo em modo dev                    |
+| `pnpm build`                                                                      | Gera o build de produção de todos os apps e packages                |
+| `pnpm test`                                                                       | Executa os testes (inclui o teste de isolamento entre tenants)      |
+| `pnpm lint`                                                                       | Executa a verificação do ESLint em todo o workspace                 |
+| `pnpm typecheck`                                                                  | Executa a checagem de tipos do TypeScript                           |
+| `pnpm format`                                                                     | Formata todo o código do repositório via Prettier                   |
+| `pnpm db:up`                                                                      | Sobe o container do PostgreSQL (`pgvector`)                         |
+| `pnpm db:down`                                                                    | Encerra o container do banco de dados                               |
+| `pnpm db:logs`                                                                    | Exibe os logs do container do banco em tempo real                   |
+| `pnpm db:reset`                                                                   | Destrói o banco, limpa os volumes e sobe uma instância limpa        |
+| `pnpm db:generate`                                                                | Gera o Prisma Client                                                |
+| `pnpm db:migrate`                                                                 | Aplica as migrations pendentes                                      |
+| `pnpm tunnel`                                                                     | Abre o túnel do ngrok na porta `3000` para testes de webhook        |
+| `pnpm --filter @megabot/worker queue:smoke`                                       | Enfileira jobs de teste (ok, falha com retry, falha definitiva)     |
+| `pnpm --filter @megabot/worker inbound:enqueue-pending`                           | Dev: enfileira os eventos de webhook `pending` (mensagens e status) |
+| `pnpm --filter @megabot/worker outbound:send-test -- <tenantId> <numero> "texto"` | Dev: enfileira o envio de uma mensagem de teste pelo WhatsApp       |

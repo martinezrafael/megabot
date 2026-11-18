@@ -16,6 +16,16 @@ export interface WorkerConfig {
   shutdownTimeoutMs: number;
   /** Schema do pg-boss (padrão `pgboss`; só os testes mudam). */
   queueSchema: string;
+  whatsapp: {
+    /** Token da Cloud API. Sem ele o worker NÃO processa `whatsapp.outbound` (os jobs esperam na fila). */
+    accessToken: string | undefined;
+    /** Só para testes/sandbox; padrão: graph.facebook.com. */
+    baseUrl: string | undefined;
+    /** Mensagens por segundo por número (padrão 80, o limite inicial da Meta). */
+    ratePerSecond: number;
+    /** Quanto o job espera por uma vaga do rate limit antes de devolver à fila (ms). */
+    rateLimitMaxWaitMs: number;
+  };
 }
 
 export class WorkerConfigError extends Error {
@@ -42,6 +52,10 @@ const envSchema = z.object({
     .string()
     .regex(/^[a-z_][a-z0-9_]*$/, 'use só letras minúsculas, números e _')
     .default('pgboss'),
+  WHATSAPP_API_TOKEN: z.string().min(1).optional(),
+  WHATSAPP_API_BASE_URL: z.url({ error: 'precisa ser uma URL' }).optional(),
+  WHATSAPP_RATE_LIMIT_PER_SECOND: z.coerce.number().positive().max(1000).default(80),
+  WHATSAPP_RATE_LIMIT_MAX_WAIT_MS: z.coerce.number().int().min(0).max(60_000).default(5_000),
 });
 
 export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerConfig {
@@ -66,5 +80,11 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
     pollIntervalSeconds: e.WORKER_POLL_INTERVAL_SECONDS,
     shutdownTimeoutMs: e.WORKER_SHUTDOWN_TIMEOUT_SECONDS * 1000,
     queueSchema: e.QUEUE_SCHEMA,
+    whatsapp: {
+      accessToken: e.WHATSAPP_API_TOKEN,
+      baseUrl: e.WHATSAPP_API_BASE_URL,
+      ratePerSecond: e.WHATSAPP_RATE_LIMIT_PER_SECOND,
+      rateLimitMaxWaitMs: e.WHATSAPP_RATE_LIMIT_MAX_WAIT_MS,
+    },
   };
 }

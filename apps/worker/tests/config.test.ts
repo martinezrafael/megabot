@@ -14,6 +14,39 @@ describe('config do worker', () => {
     assert.equal(config.logLevel, 'info');
   });
 
+  it('WhatsApp: padrões e variáveis do envio', () => {
+    const d = loadWorkerConfig({ ...base, NODE_ENV: 'production' }).whatsapp;
+    assert.equal(d.accessToken, undefined);
+    assert.equal(d.baseUrl, undefined);
+    assert.equal(d.ratePerSecond, 80);
+    assert.equal(d.rateLimitMaxWaitMs, 5_000);
+
+    const c = loadWorkerConfig({
+      ...base,
+      WHATSAPP_API_TOKEN: 'abc',
+      WHATSAPP_API_BASE_URL: 'http://localhost:9999',
+      WHATSAPP_RATE_LIMIT_PER_SECOND: '10',
+      WHATSAPP_RATE_LIMIT_MAX_WAIT_MS: '0',
+    }).whatsapp;
+    assert.deepEqual(c, {
+      accessToken: 'abc',
+      baseUrl: 'http://localhost:9999',
+      ratePerSecond: 10,
+      rateLimitMaxWaitMs: 0,
+    });
+  });
+
+  it('WhatsApp: rejeita limite inválido e URL inválida', () => {
+    assert.throws(
+      () => loadWorkerConfig({ ...base, WHATSAPP_RATE_LIMIT_PER_SECOND: '0' }),
+      WorkerConfigError,
+    );
+    assert.throws(
+      () => loadWorkerConfig({ ...base, WHATSAPP_API_BASE_URL: 'não é url' }),
+      WorkerConfigError,
+    );
+  });
+
   it('em teste o log é silencioso, a menos que LOG_LEVEL seja definido', () => {
     assert.equal(loadWorkerConfig({ ...base, NODE_ENV: 'test' }).logLevel, 'silent');
     assert.equal(

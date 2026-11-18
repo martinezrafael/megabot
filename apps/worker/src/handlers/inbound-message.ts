@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 import {
-  applyStatusUpdate,
   createLogMetrics,
   decideAgentTrigger,
   getConversationQuotaPosition,
@@ -14,6 +13,8 @@ import {
 } from '@megabot/database';
 import { NonRetryableError, type JobHandler, type PayloadOf, type QUEUES } from '@megabot/queue';
 import { z } from 'zod';
+import { INBOUND_METRIC } from './inbound-metrics';
+import { DEFAULT_STATUS_GRACE_MS, processStatusEvent } from './message-status';
 
 /**
  * Job `whatsapp.inbound` (T1.5): processa UM evento já gravado em `webhook_events`.
@@ -29,12 +30,7 @@ import { z } from 'zod';
  *  - o evento só é marcado `processed` no FIM; um evento `processed` é ignorado.
  */
 
-export const INBOUND_METRIC = {
-  /** Eventos processados. Rótulos: tenant_id, kind, outcome. */
-  events: 'inbound_events_total',
-  /** Decisão de acionar o agente. Rótulos: tenant_id, trigger (true|false), reason. */
-  decisions: 'inbound_agent_decisions_total',
-} as const;
+export { INBOUND_METRIC };
 
 export interface InboundMessageDeps {
   /** Enfileira `llm.reply`. `jobId` é fixo por evento: enfileirar duas vezes cria um job só. */
@@ -50,8 +46,6 @@ export interface InboundMessageDeps {
   statusGraceMs?: number;
 }
 
-const DEFAULT_STATUS_GRACE_MS = 10 * 60 * 1000;
-
 /** Só o que precisamos do payload gravado pelo webhook (T1.2); o resto é preservado em `content`. */
 const messagePayload = z.looseObject({
   id: z.string().min(1),
@@ -63,15 +57,6 @@ const messagePayload = z.looseObject({
   media: z.looseObject({ caption: z.string().optional() }).optional(),
   button: z.looseObject({ text: z.string().optional() }).optional(),
   interactive: z.looseObject({ title: z.string().optional() }).optional(),
-});
-
-const statusPayload = z.looseObject({
-  messageId: z.string().min(1),
-  status: z.enum(['sent', 'delivered', 'read', 'failed']),
-  timestamp: z.coerce.date(),
-  errors: z
-    .array(z.looseObject({ code: z.number().optional(), message: z.string().optional() }))
-    .optional(),
 });
 
 /** Campos do payload que viram `messages.content` (tudo menos o texto, que vai em `body`). */
@@ -241,36 +226,24 @@ export function createInboundMessageHandler(
       ev: WebhookEventRecord,
       failFn: (reason: string, detail: string) => Promise<never>,
     ): Promise<void> {
-      const parsed = statusPayload.safeParse(ev.payload);
-      if (!parsed.success) {
-        const fields = parsed.error.issues.map((i) => i.path.join('.') || '(raiz)').join(', ');
-        return failFn('invalid_payload', fields);
+      let result;
+      try {
+        result = await processStatusEvent({
+          tenantId,
+          event: ev,
+          now: now(),
+          statusGraceMs,
+          logger,
+        });
+      } catch (error) {
+        // O envio talvez ainda não tenha gravado o wamid: tenta de novo (retry da fila).
+        count('status', 'not_found_retry');
+        throw error;
       }
-      const st = parsed.data;
-      const firstError = st.errors?.[0];
-      const outcome = await applyStatusUpdate(
-        tenantId,
-        {
-          wamid: st.messageId,
-          status: st.status,
-          at: st.timestamp,
-          ...(firstError?.code !== undefined ? { errorCode: String(firstError.code) } : {}),
-          ...(firstError?.message !== undefined ? { errorMessage: firstError.message } : {}),
-        },
-        { now: now(), logger, metrics },
-      );
-
-      if (outcome === 'not_found') {
-        const ageMs = now().getTime() - ev.receivedAt.getTime();
-        if (ageMs < statusGraceMs) {
-          // O envio talvez ainda não tenha gravado o wamid: tenta de novo (retry da fila).
-          count('status', 'not_found_retry');
-          throw new Error('wamid ainda não gravado; tentar de novo');
-        }
-        count('status', 'not_found_ignored');
-        return;
+      if (result.outcome === 'invalid_payload') {
+        return failFn('invalid_payload', result.fields ?? '');
       }
-      count('status', outcome);
+      count('status', result.outcome);
     }
   };
 }

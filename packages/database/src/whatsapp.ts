@@ -183,3 +183,23 @@ export function listPendingWebhookEventIds(tenantId: string, limit = 500): Promi
     return rows.map((r) => r.id);
   });
 }
+
+export interface PendingWebhookEvent {
+  id: string;
+  kind: string;
+}
+
+/** Como `listPendingWebhookEventIds`, mas com o tipo do evento (para escolher a fila certa). */
+export function listPendingWebhookEvents(
+  tenantId: string,
+  limit = 500,
+): Promise<PendingWebhookEvent[]> {
+  return withTenant(tenantId, (tx) =>
+    tx.webhookEvent.findMany({
+      where: { tenantId, processStatus: 'pending' },
+      orderBy: { receivedAt: 'asc' },
+      take: limit,
+      select: { id: true, kind: true },
+    }),
+  );
+}
