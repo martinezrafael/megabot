@@ -116,3 +116,70 @@ export async function storeWebhookEvents(
     duplicates: events.length - result.count,
   };
 }
+
+export interface WebhookEventRecord {
+  id: string;
+  tenantId: string;
+  kind: string;
+  wamid: string | null;
+  status: string | null;
+  eventAt: Date;
+  receivedAt: Date;
+  payload: Prisma.JsonValue;
+  processStatus: string;
+}
+
+/** Lê um evento da caixa de entrada (T1.5). `null` se não existe NESTE tenant (RLS). */
+export function getWebhookEvent(
+  tenantId: string,
+  eventId: string,
+): Promise<WebhookEventRecord | null> {
+  return withTenant(tenantId, (tx) =>
+    tx.webhookEvent.findUnique({
+      where: { id: eventId },
+      select: {
+        id: true,
+        tenantId: true,
+        kind: true,
+        wamid: true,
+        status: true,
+        eventAt: true,
+        receivedAt: true,
+        payload: true,
+        processStatus: true,
+      },
+    }),
+  );
+}
+
+/**
+ * Marca o fim do processamento de um evento: `processed` ou `failed`.
+ * Só sai de `pending` (ou de `failed`, para reprocessar); um evento `processed` não muda mais.
+ */
+export async function markWebhookEvent(
+  tenantId: string,
+  eventId: string,
+  processStatus: 'processed' | 'failed',
+  now: Date = new Date(),
+): Promise<boolean> {
+  const result = await withTenant(tenantId, (tx) =>
+    tx.webhookEvent.updateMany({
+      where: { id: eventId, tenantId, processStatus: { not: 'processed' } },
+      data: { processStatus, processedAt: now },
+    }),
+  );
+  return result.count > 0;
+}
+
+/** Ids dos eventos ainda `pending` de um tenant, do mais antigo ao mais novo (para reprocessar). */
+export function listPendingWebhookEventIds(tenantId: string, limit = 500): Promise<string[]> {
+  return withTenant(tenantId, async (tx) => {
+    const rows = await tx.webhookEvent.findMany({
+      where: { tenantId, processStatus: 'pending' },
+      orderBy: { receivedAt: 'asc' },
+      take: limit,
+      select: { id: true },
+    });
+    return rows.map((r) => r.id);
+  });
+}

@@ -178,6 +178,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@megabot/database':
+        specifier: workspace:*
+        version: link:../../packages/database
       '@megabot/queue':
         specifier: workspace:*
         version: link:../../packages/queue

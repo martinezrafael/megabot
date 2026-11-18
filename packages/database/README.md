@@ -47,6 +47,25 @@ await applyStatusUpdate(tenantId, { wamid, status: 'delivered', at });
 
 Regras completas: [ADR 0015](../../docs/adr/0015-modelo-de-conversas.md) e [ADR 0010](../../docs/adr/0010-janela-de-conversa-24h.md).
 
+### Decisão de acionar o agente (T1.5)
+
+```ts
+import { decideAgentTrigger, getTenantGate, getConversationQuotaPosition } from '@megabot/database';
+
+const gate = await getTenantGate(tenantId); // { status, conversationLimitPerMonth } (null = sem limite)
+const position = await getConversationQuotaPosition(tenantId, conversationId); // 1 = 1ª conversa do mês
+const { trigger, reason } = decideAgentTrigger({
+  tenantStatus: gate.status,
+  messageType: 'text',
+  windowOpen: true,
+  quotaLimit: gate.conversationLimitPerMonth,
+  quotaPosition: position,
+});
+// reason: ok | tenant_inactive | window_expired | unsupported_type | quota_exceeded
+```
+
+O job que usa tudo isto está em `apps/worker/src/handlers/inbound-message.ts` ([ADR 0016](../../docs/adr/0016-job-inbound-message.md)).
+
 > Decisão de escopo: `tenants` e `users` não têm RLS. Qualquer sessão com acesso ao banco consegue listá-las. Ao criar tabelas que pertencem a um tenant, siga o checklist da seção "Adicionando RLS a uma nova tabela".
 
 ## Como o isolamento funciona

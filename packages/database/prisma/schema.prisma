@@ -19,6 +19,10 @@ model Tenant {
   slug                String               @unique @db.VarChar(255)
   createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  /// `active` | `suspended` (CHECK no banco). Tenant suspenso não aciona o agente (T1.5).
+  status              String               @default("active") @db.VarChar(20)
+  /// Limite de conversas (janelas de 24h abertas) por mês. NULL = sem limite (ADR 0011).
+  conversationLimitPerMonth Int?           @map("conversation_limit_per_month")
   members             Membership[]
   whatsappConnections WhatsappConnection[]
   webhookEvents       WebhookEvent[]
@@ -202,6 +206,7 @@ model Conversation {
   @@unique([tenantId, id])
   @@index([tenantId, contactId, windowStartedAt])
   @@index([tenantId, status, windowExpiresAt])
+  @@index([tenantId, windowStartedAt])
   @@map("conversations")
 }
 
