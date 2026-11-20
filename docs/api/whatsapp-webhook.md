@@ -32,10 +32,11 @@ Rota: `GET` e `POST` em `/webhooks/whatsapp` (pública, sem sessão). Quem prote
    - URL de callback: `https://SEU-TUNEL.ngrok-free.app/webhooks/whatsapp`
    - Verificar token: o mesmo `WHATSAPP_VERIFY_TOKEN`
    - Clique em **Verificar e salvar** (a Meta chama o `GET`) e assine o campo **messages**.
-4. Ligue o seu número a um tenant (ainda não há tela):
+4. Ligue o seu número a um tenant (ainda não há tela): use a **rota de admin** (veja
+   [`admin-whatsapp-connections.md`](admin-whatsapp-connections.md)) ou o script:
    - Faça login no sistema e abra `GET /me`: copie `tenant.id`.
-   - Pegue `phone_number_id` e `waba_id` em WhatsApp > Configuração da API.
-   - Rode: `pnpm db:whatsapp-connect --tenant <tenant.id> --phone-number-id <id> --waba-id <id>`
+   - Pegue `phone_number_id`, `waba_id` e o token em WhatsApp > Configuração da API.
+   - Rode: `WHATSAPP_CONNECT_TOKEN=<token> pnpm db:whatsapp-connect --tenant <tenant.id> --phone-number-id <id> --waba-id <id>`
 5. Envie uma mensagem para o número de teste. Confira no banco:
 
    ```bash

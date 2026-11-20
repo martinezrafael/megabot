@@ -1,6 +1,58 @@
 {
   "components": {
     "schemas": {
+      "ConnectWhatsappNumberBodyDto": {
+        "properties": {
+          "accessToken": {
+            "description": "Token de acesso da Cloud API (use um token de usuário de sistema). Guardado cifrado; nunca é devolvido nem logado.",
+            "format": "password",
+            "type": "string",
+            "writeOnly": true
+          },
+          "displayPhoneNumber": {
+            "example": "+55 11 99999-0000",
+            "type": "string"
+          },
+          "phoneNumberId": {
+            "description": "`phone_number_id` da Meta (só dígitos)",
+            "example": "106540352242922",
+            "type": "string"
+          },
+          "tenantId": {
+            "description": "Empresa (tenant) dona do número",
+            "format": "uuid",
+            "type": "string"
+          },
+          "wabaId": {
+            "description": "WhatsApp Business Account id",
+            "example": "102290129340398",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenantId",
+          "phoneNumberId",
+          "wabaId",
+          "accessToken"
+        ],
+        "type": "object"
+      },
+      "ConnectWhatsappNumberResponseDto": {
+        "properties": {
+          "connection": {
+            "$ref": "#/components/schemas/WhatsappConnectionDto"
+          },
+          "created": {
+            "description": "true = conexão nova; false = atualizou uma existente",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "created",
+          "connection"
+        ],
+        "type": "object"
+      },
       "ErrorResponseDto": {
         "properties": {
           "details": {
@@ -502,6 +554,63 @@
           "status"
         ],
         "type": "object"
+      },
+      "WhatsappConnectionDto": {
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "displayPhoneNumber": {
+            "nullable": true,
+            "type": "string"
+          },
+          "hasToken": {
+            "description": "Há token cifrado guardado (o valor nunca é exibido)",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "phoneNumberId": {
+            "type": "string"
+          },
+          "tenantId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "tokenKeyId": {
+            "description": "Id da chave (KEK) que protege o token",
+            "nullable": true,
+            "type": "string"
+          },
+          "tokenUpdatedAt": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "wabaId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "tenantId",
+          "phoneNumberId",
+          "wabaId",
+          "displayPhoneNumber",
+          "hasToken",
+          "tokenKeyId",
+          "tokenUpdatedAt",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -675,6 +784,170 @@
           }
         ],
         "summary": "Jobs mais recentes de uma fila (sem o payload)",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/whatsapp/connections": {
+      "get": {
+        "operationId": "AdminWhatsappController_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "tenantId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/WhatsappConnectionDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "tenantId inválido"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Sem sessão válida"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Não é administrador da plataforma"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Conexões de uma empresa (sem o token)",
+        "tags": [
+          "admin"
+        ]
+      },
+      "post": {
+        "operationId": "AdminWhatsappController_connect",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectWhatsappNumberBodyDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectWhatsappNumberResponseDto"
+                }
+              }
+            },
+            "description": "`created=true` (nova) ou `created=false` (atualizada; o status HTTP é 200)"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Corpo inválido"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Sem sessão válida"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Não é administrador da plataforma"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Empresa inexistente"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "O número já está conectado a OUTRA empresa"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Criptografia de tokens não configurada no servidor"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Conectar (ou atualizar) o número do WhatsApp de uma empresa, guardando o token cifrado",
         "tags": [
           "admin"
         ]

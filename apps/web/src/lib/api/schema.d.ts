@@ -38,6 +38,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/whatsapp/connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Conexões de uma empresa (sem o token) */
+        get: operations["AdminWhatsappController_list"];
+        put?: never;
+        /** Conectar (ou atualizar) o número do WhatsApp de uma empresa, guardando o token cifrado */
+        post: operations["AdminWhatsappController_connect"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/callback/{id}": {
         parameters: {
             query?: never;
@@ -582,6 +600,35 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        ConnectWhatsappNumberBodyDto: {
+            /**
+             * Format: password
+             * @description Token de acesso da Cloud API (use um token de usuário de sistema). Guardado cifrado; nunca é devolvido nem logado.
+             */
+            accessToken: string;
+            /** @example +55 11 99999-0000 */
+            displayPhoneNumber?: string;
+            /**
+             * @description `phone_number_id` da Meta (só dígitos)
+             * @example 106540352242922
+             */
+            phoneNumberId: string;
+            /**
+             * Format: uuid
+             * @description Empresa (tenant) dona do número
+             */
+            tenantId: string;
+            /**
+             * @description WhatsApp Business Account id
+             * @example 102290129340398
+             */
+            wabaId: string;
+        };
+        ConnectWhatsappNumberResponseDto: {
+            connection: components["schemas"]["WhatsappConnectionDto"];
+            /** @description true = conexão nova; false = atualizou uma existente */
+            created: boolean;
+        };
         ErrorResponseDto: {
             /** @description Informações extras (ex.: resultado do readiness check) */
             details?: Record<string, never>;
@@ -767,6 +814,25 @@ export interface components {
             /** @example ok */
             status: string;
         };
+        WhatsappConnectionDto: {
+            /** Format: date-time */
+            createdAt: string;
+            displayPhoneNumber: string | null;
+            /** @description Há token cifrado guardado (o valor nunca é exibido) */
+            hasToken: boolean;
+            /** Format: uuid */
+            id: string;
+            phoneNumberId: string;
+            /** Format: uuid */
+            tenantId: string;
+            /** @description Id da chave (KEK) que protege o token */
+            tokenKeyId: string | null;
+            /** Format: date-time */
+            tokenUpdatedAt: string | null;
+            /** Format: date-time */
+            updatedAt: string;
+            wabaId: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -866,6 +932,132 @@ export interface operations {
             };
             /** @description Fila inexistente */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+        };
+    };
+    AdminWhatsappController_list: {
+        parameters: {
+            query: {
+                tenantId: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WhatsappConnectionDto"][];
+                };
+            };
+            /** @description tenantId inválido */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Sem sessão válida */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Não é administrador da plataforma */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+        };
+    };
+    AdminWhatsappController_connect: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectWhatsappNumberBodyDto"];
+            };
+        };
+        responses: {
+            /** @description `created=true` (nova) ou `created=false` (atualizada; o status HTTP é 200) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectWhatsappNumberResponseDto"];
+                };
+            };
+            /** @description Corpo inválido */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Sem sessão válida */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Não é administrador da plataforma */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Empresa inexistente */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description O número já está conectado a OUTRA empresa */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Criptografia de tokens não configurada no servidor */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

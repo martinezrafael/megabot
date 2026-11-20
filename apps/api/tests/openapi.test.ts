@@ -16,6 +16,7 @@ describe('Contrato OpenAPI', () => {
       '/webhooks/whatsapp',
       '/admin/queues',
       '/admin/queues/{name}/jobs',
+      '/admin/whatsapp/connections',
     ]) {
       assert.ok(spec.paths[route], `${route} ausente no contrato`);
     }
@@ -27,6 +28,8 @@ describe('Contrato OpenAPI', () => {
         .filter((n) => n.endsWith('Dto'))
         .sort(),
       [
+        'ConnectWhatsappNumberBodyDto',
+        'ConnectWhatsappNumberResponseDto',
         'ErrorResponseDto',
         'JobSummaryDto',
         'LivenessResponseDto',
@@ -39,6 +42,7 @@ describe('Contrato OpenAPI', () => {
         'QueuesSnapshotDto',
         'ReadinessResponseDto',
         'WebhookAckDto',
+        'WhatsappConnectionDto',
       ],
     );
   });

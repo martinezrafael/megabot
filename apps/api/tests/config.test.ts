@@ -110,6 +110,7 @@ describe('Configuração validada com Zod', () => {
       WEB_URL: 'https://app.exemplo.com',
       WHATSAPP_APP_SECRET: 'segredo-do-app-da-meta',
       WHATSAPP_VERIFY_TOKEN: 'token-de-verificacao',
+      TOKEN_ENCRYPTION_KEYS: `k1:${Buffer.alloc(32, 1).toString('base64')}`,
     });
     assert.equal(config.swaggerEnabled, false);
   });
@@ -136,6 +137,31 @@ describe('Configuração validada com Zod', () => {
     });
     assert.ok(issues.some((i) => i.startsWith('WHATSAPP_APP_SECRET')));
     assert.ok(issues.some((i) => i.startsWith('WHATSAPP_VERIFY_TOKEN')));
+  });
+
+  it('TOKEN_ENCRYPTION_KEYS: opcional em dev, obrigatória em produção, validada', () => {
+    const key = Buffer.alloc(32, 7).toString('base64');
+    assert.equal(loadConfig(VALID_ENV).tokenCipher, null);
+    const config = loadConfig({ ...VALID_ENV, TOKEN_ENCRYPTION_KEYS: `k1:${key}` });
+    assert.equal(config.tokenCipher?.activeKeyId, 'k1');
+    assert.ok(
+      issuesOf({ ...VALID_ENV, TOKEN_ENCRYPTION_KEYS: 'k1:curta' }).some((i) =>
+        i.includes('TOKEN_ENCRYPTION_KEYS'),
+      ),
+    );
+    const prod = {
+      ...VALID_ENV,
+      NODE_ENV: 'production',
+      BETTER_AUTH_URL: 'https://api.exemplo.com',
+      WEB_URL: 'https://app.exemplo.com',
+      WHATSAPP_APP_SECRET: 'segredo-do-app',
+      WHATSAPP_VERIFY_TOKEN: 'token-de-verificacao-1234',
+    };
+    assert.ok(issuesOf(prod).some((i) => i.includes('TOKEN_ENCRYPTION_KEYS')));
+    assert.equal(
+      loadConfig({ ...prod, TOKEN_ENCRYPTION_KEYS: `k1:${key}` }).tokenCipher?.activeKeyId,
+      'k1',
+    );
   });
 
   it('token de verificação curto demais é recusado', () => {

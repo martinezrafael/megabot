@@ -1,7 +1,7 @@
 import { createServer } from 'node:net';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import type { NestExpressApplication } from '@nestjs/platform-express';
-import { listUserTenants, prisma } from '@megabot/database';
+import { LocalKeyring, TokenCipher, listUserTenants, prisma } from '@megabot/database';
 import { createApp } from '../src/bootstrap';
 import type { AppConfig } from '../src/config';
 import type { DestinationStream } from 'pino';
@@ -63,6 +63,7 @@ export function createTestConfig(port: number, overrides: Partial<AppConfig> = {
     trustProxy: false,
     swaggerEnabled: false,
     whatsapp: { appSecret: undefined, verifyToken: undefined },
+    tokenCipher: new TokenCipher(new LocalKeyring({ test: randomBytes(32) }, 'test')),
     ...overrides,
   };
 }

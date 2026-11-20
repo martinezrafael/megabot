@@ -1,15 +1,27 @@
 /**
- * Liga um número do WhatsApp a um tenant (até existir a tela de conexão).
+ * Liga um número do WhatsApp a um tenant pela linha de comando (alternativa à rota de admin
+ * `POST /admin/whatsapp/connections`, T1.7).
+ *
+ * Token: passe-o pela VARIÁVEL DE AMBIENTE `WHATSAPP_CONNECT_TOKEN` (nunca como argumento: ficaria no
+ * histórico do shell). Com TOKEN_ENCRYPTION_KEYS definida, ele é guardado CIFRADO. Sem
+ * `WHATSAPP_CONNECT_TOKEN`, liga o número sem token (usa o token global do worker).
  *
  * Uso (na raiz do repositório):
- *   pnpm db:whatsapp-connect --tenant <uuid> --phone-number-id <id> --waba-id <id> [--display <numero>]
+ *   WHATSAPP_CONNECT_TOKEN=EAAG... pnpm db:whatsapp-connect --tenant <uuid> --phone-number-id <id> --waba-id <id> [--display <numero>]
  *
  * Onde achar:
  *   - tenant: faça login e abra GET /me (campo tenant.id)
  *   - phone-number-id e waba-id: Meta for Developers > WhatsApp > Configuração da API
  */
 import { parseArgs } from 'node:util';
-import { prisma, registerWhatsappConnection } from '../src';
+import {
+  PhoneNumberTakenError,
+  TenantNotFoundError,
+  connectWhatsappNumber,
+  createTokenCipherFromEnv,
+  prisma,
+  registerWhatsappConnection,
+} from '../src';
 
 async function main() {
   const { values } = parseArgs({
@@ -31,12 +43,42 @@ async function main() {
     process.exit(1);
   }
 
-  const connection = await registerWhatsappConnection(tenantId, {
+  const base = {
     phoneNumberId,
     wabaId,
     ...(values.display ? { displayPhoneNumber: values.display } : {}),
-  });
-  console.info(`Número ${connection.phoneNumberId} ligado ao tenant ${connection.tenantId}.`);
+  };
+  const accessToken = process.env.WHATSAPP_CONNECT_TOKEN;
+
+  if (accessToken) {
+    const cipher = createTokenCipherFromEnv();
+    if (!cipher) {
+      console.error('Defina TOKEN_ENCRYPTION_KEYS no .env para guardar o token cifrado.');
+      process.exit(1);
+    }
+    try {
+      const { connection, created } = await connectWhatsappNumber(
+        tenantId,
+        { ...base, accessToken },
+        cipher,
+      );
+      console.info(
+        `Número ${connection.phoneNumberId} ${created ? 'ligado' : 'atualizado'} no tenant ${connection.tenantId} (token cifrado com a chave "${connection.tokenKeyId}").`,
+      );
+    } catch (error) {
+      if (error instanceof PhoneNumberTakenError || error instanceof TenantNotFoundError) {
+        console.error(error.message);
+        process.exit(1);
+      }
+      throw error;
+    }
+    return;
+  }
+
+  const connection = await registerWhatsappConnection(tenantId, base);
+  console.info(
+    `Número ${connection.phoneNumberId} ligado ao tenant ${connection.tenantId} (SEM token próprio).`,
+  );
 }
 
 main()

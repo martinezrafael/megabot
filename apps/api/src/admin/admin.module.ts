@@ -2,6 +2,8 @@ import { type DynamicModule, Module } from '@nestjs/common';
 import { QueueInspector } from '@megabot/queue';
 import type { AppConfig } from '../config';
 import { APP_CONFIG } from '../config.tokens';
+import { AdminWhatsappController } from './admin-whatsapp.controller';
+import { AdminWhatsappService } from './admin-whatsapp.service';
 import { AdminQueuesController } from './admin-queues.controller';
 import {
   AdminQueuesService,
@@ -17,9 +19,10 @@ export class AdminModule {
     return {
       module: AdminModule,
       imports: [PlatformAdminModule],
-      controllers: [AdminQueuesController],
+      controllers: [AdminQueuesController, AdminWhatsappController],
       providers: [
         AdminQueuesService,
+        AdminWhatsappService,
         {
           provide: QUEUE_INSPECTOR,
           inject: [APP_CONFIG],

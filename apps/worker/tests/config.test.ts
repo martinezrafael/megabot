@@ -79,4 +79,35 @@ describe('config do worker', () => {
     assert.throws(() => loadWorkerConfig({ DATABASE_URL: '' }), /DATABASE_URL/);
     assert.equal(loadWorkerConfig({ ...base, LOG_LEVEL: '' }).logLevel, 'info');
   });
+
+  it('T1.7: chaveiro, relay e eco', () => {
+    const key = Buffer.alloc(32, 9).toString('base64');
+    const dev = loadWorkerConfig({ ...base, NODE_ENV: 'production' });
+    assert.equal(dev.tokenCipher, null);
+    assert.equal(dev.echoEnabled, false);
+    assert.equal(dev.inboxRelayIntervalMs, 5_000);
+    assert.equal(loadWorkerConfig({ ...base, NODE_ENV: 'test' }).inboxRelayIntervalMs, 0);
+
+    const c = loadWorkerConfig({
+      ...base,
+      NODE_ENV: 'development',
+      TOKEN_ENCRYPTION_KEYS: `k1:${key}`,
+      WORKER_ECHO_ENABLED: 'true',
+      WORKER_INBOX_RELAY_INTERVAL_SECONDS: '0.5',
+    });
+    assert.equal(c.tokenCipher?.activeKeyId, 'k1');
+    assert.equal(c.echoEnabled, true);
+    assert.equal(c.inboxRelayIntervalMs, 500);
+  });
+
+  it('T1.7: chave inválida e eco em produção são recusados', () => {
+    assert.throws(
+      () => loadWorkerConfig({ ...base, TOKEN_ENCRYPTION_KEYS: 'k1:curta' }),
+      /TOKEN_ENCRYPTION_KEYS/,
+    );
+    assert.throws(
+      () => loadWorkerConfig({ ...base, NODE_ENV: 'production', WORKER_ECHO_ENABLED: 'true' }),
+      /eco não pode/,
+    );
+  });
 });

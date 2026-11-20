@@ -130,6 +130,11 @@ model WhatsappConnection {
   wabaId             String   @map("waba_id")
   displayPhoneNumber String?  @map("display_phone_number")
   createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// Token da Cloud API cifrado (envelope, ADR 0018). Nunca em texto puro.
+  accessTokenEnvelope String?   @map("access_token_envelope")
+  /// Id da KEK usada (para rotação).
+  tokenKeyId          String?   @map("token_key_id")
+  tokenUpdatedAt      DateTime? @map("token_updated_at")
   updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
