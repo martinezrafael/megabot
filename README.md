@@ -66,6 +66,8 @@ Os testes de integração usam o banco local. Antes de `pnpm test`, o container 
 
 O envio de mensagens e a leitura dos webhooks da Cloud API ficam em `packages/whatsapp`. Uso, tipos de evento, erros e métricas: [packages/whatsapp/README.md](packages/whatsapp/README.md).
 
+A ligação com o modelo de IA (chat com tool calling, embeddings, custo e erros) fica em `packages/ai`. Uso, configuração e erros: [packages/ai/README.md](packages/ai/README.md).
+
 ---
 
 ## 🔐 Autenticação (Better Auth)

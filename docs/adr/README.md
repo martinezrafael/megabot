@@ -25,6 +25,7 @@ um arquivo curto, versionado junto com o código, que explica **o que** foi deci
 | [0016](0016-job-inbound-message.md)         | Job inbound-message e decisão do agente       | Aceita   |
 | [0017](0017-envio-e-status.md)              | Envio, rate limit e status                    | Aceita   |
 | [0018](0018-token-por-numero-envelope.md)   | Token por número com criptografia de envelope | Aceita   |
+| [0019](0019-pacote-ai.md)                   | Pacote ai: LLM, embeddings, custo e erros     | Aceita   |
 
 ## Status
 

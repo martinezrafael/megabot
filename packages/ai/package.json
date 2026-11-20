@@ -1,0 +1,25 @@
+{
+  "name": "@megabot/ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Ligação com o modelo de IA (chat com tool calling tipado e embeddings), com registro de tokens e custo por chamada",
+  "main": "./dist/index.js",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "swc src -d dist --strip-leading-paths --config-file ../config/swc/.swcrc -C module.type=commonjs",
+    "lint": "eslint .",
+    "check-types": "tsc --noEmit",
+    "test": "node --import tsx --test --test-concurrency=1 \"tests/**/*.test.ts\"",
+    "smoke": "node --env-file=../../.env --import tsx scripts/smoke.ts"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@megabot/eslint-config": "workspace:*",
+    "@megabot/tsconfig": "workspace:*",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.0.0"
+  }
+}
