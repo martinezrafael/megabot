@@ -24,6 +24,7 @@ um arquivo curto, versionado junto com o código, que explica **o que** foi deci
 | [0015](0015-modelo-de-conversas.md)         | Modelo de conversas e janela de 24h           | Aceita   |
 | [0016](0016-job-inbound-message.md)         | Job inbound-message e decisão do agente       | Aceita   |
 | [0017](0017-envio-e-status.md)              | Envio, rate limit e status                    | Aceita   |
+| [0018](0018-token-por-numero-envelope.md)   | Token por número com criptografia de envelope | Aceita   |
 
 ## Status
 

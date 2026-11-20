@@ -215,7 +215,7 @@ O webhook da Meta só traz o `phone_number_id`: ainda não sabemos o tenant. Mes
 - `whatsapp_connection_lookup_policy` libera o SELECT da conexão cujo número está em `app.phone_number_id` (função `current_app_phone_number_id()`). Dá para ler UMA linha por vez, nunca listar as de todos os tenants.
 - `findWhatsappConnectionByPhoneNumberId(phoneNumberId)` é o único ponto que usa essa policy. Devolve `{ tenantId, wabaId }` ou `null`.
 - `storeWebhookEvents(tenantId, events)` grava via `withTenant` com `createMany({ skipDuplicates: true })` (`ON CONFLICT DO NOTHING`). Devolve quantos foram inseridos e quantos eram duplicados.
-- `registerWhatsappConnection(tenantId, ...)` liga um número a um tenant. Enquanto não existe tela para isso: `pnpm db:whatsapp-connect --tenant <uuid> --phone-number-id <id> --waba-id <id>`.
+- `registerWhatsappConnection(tenantId, ...)` liga um número a um tenant **sem token**. Com token cifrado (T1.7, ADR 0018): `connectWhatsappNumber(tenantId, {..., accessToken}, cipher)`, `getWhatsappAccessToken(tenantId, cipher, phoneNumberId?)` e `listWhatsappConnections(tenantId)` (só metadados). `TokenCipher`/`createTokenCipherFromEnv()` fazem a criptografia de envelope. Pela linha de comando: `WHATSAPP_CONNECT_TOKEN=<token> pnpm db:whatsapp-connect --tenant <uuid> --phone-number-id <id> --waba-id <id>`.
 
 **Chave de idempotência (`event_key`):** `message:<wamid>`, `status:<wamid>:<status>` (o mesmo wamid recebe sent, delivered e read) ou `error:<uuid>` (erros de sistema não têm id). **Ordem real:** use `event_at` (hora da Meta); `received_at` é só a ordem de chegada.
 

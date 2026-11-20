@@ -20,6 +20,7 @@ const SPEC_CONFIG: AppConfig = {
   trustProxy: false,
   swaggerEnabled: false,
   whatsapp: { appSecret: undefined, verifyToken: undefined },
+  tokenCipher: null,
 };
 
 /** Gera o contrato OpenAPI sem depender de .env, banco ou rede. */

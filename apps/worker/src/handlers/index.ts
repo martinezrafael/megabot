@@ -1,6 +1,8 @@
+import { getWhatsappAccessToken } from '@megabot/database';
 import { QUEUES, type QueueClient } from '@megabot/queue';
 import type { Logger } from 'pino';
 import type { WorkerConfig } from '../config';
+import { createEchoReplyHandler } from './echo-reply';
 import { createInboundMessageHandler } from './inbound-message';
 import { createMessageStatusHandler } from './message-status';
 import { createOutboundMessageHandler } from './outbound-message';
@@ -38,13 +40,22 @@ export async function registerHandlers(
   await client.work(QUEUES.whatsappStatus, createMessageStatusHandler());
   registered.push(QUEUES.whatsappStatus.name);
 
-  // T1.6: envia mensagens pela Cloud API. Sem token o worker NÃO pega esses jobs: eles esperam
-  // na fila (em vez de falhar e ir para a DLQ) até o token ser configurado.
-  if (config.whatsapp.accessToken) {
+  // T1.6/T1.7: envia mensagens pela Cloud API com o token do PRÓPRIO número (cifrado no banco).
+  // Sem chaveiro e sem token global o worker NÃO pega esses jobs: eles esperam na fila (em vez de
+  // falhar e ir para a DLQ) até a configuração existir.
+  const cipher = config.tokenCipher;
+  if (cipher || config.whatsapp.accessToken) {
     await client.work(
       QUEUES.whatsappOutbound,
       createOutboundMessageHandler({
         accessToken: config.whatsapp.accessToken,
+        ...(cipher
+          ? {
+              resolveAccessToken: async (tenantId: string, phoneNumberId: string) =>
+                (await getWhatsappAccessToken(tenantId, cipher, phoneNumberId))?.accessToken ??
+                null,
+            }
+          : {}),
         baseUrl: config.whatsapp.baseUrl,
         ratePerSecond: config.whatsapp.ratePerSecond,
         rateLimitMaxWaitMs: config.whatsapp.rateLimitMaxWaitMs,
@@ -54,8 +65,21 @@ export async function registerHandlers(
   } else {
     logger?.warn(
       { event: 'worker.outbound_disabled', queue: QUEUES.whatsappOutbound.name },
-      'WHATSAPP_API_TOKEN ausente: whatsapp.outbound NÃO será processado (os jobs ficam esperando)',
+      'Sem TOKEN_ENCRYPTION_KEYS nem WHATSAPP_API_TOKEN: whatsapp.outbound NÃO será processado (os jobs ficam esperando)',
     );
+  }
+
+  // T1.7: eco (validação ponta a ponta). Desligado por padrão; proibido em produção (config).
+  if (config.echoEnabled) {
+    await client.work(
+      QUEUES.llmReply,
+      createEchoReplyHandler({
+        enqueueOutbound: (payload, options) =>
+          client.enqueue(QUEUES.whatsappOutbound, payload, options),
+      }),
+    );
+    registered.push(QUEUES.llmReply.name);
+    logger?.warn({ event: 'worker.echo_enabled' }, 'ECO LIGADO: llm.reply responde "Eco: <texto>"');
   }
 
   return registered;

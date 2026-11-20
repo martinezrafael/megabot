@@ -1,3 +1,4 @@
+import { TokenCryptoError, createTokenCipherFromEnv, type TokenCipher } from '@megabot/database';
 import { z } from 'zod';
 
 /**
@@ -26,6 +27,15 @@ export interface WorkerConfig {
     /** Quanto o job espera por uma vaga do rate limit antes de devolver à fila (ms). */
     rateLimitMaxWaitMs: number;
   };
+  /**
+   * Cifrador dos tokens por número (T1.7, ADR 0018). Com ele, cada envio usa o token do PRÓPRIO
+   * número (decifrado na hora). `null` = só o token global `WHATSAPP_API_TOKEN` (legado/dev).
+   */
+  tokenCipher: TokenCipher | null;
+  /** De quanto em quanto tempo enfileirar eventos do webhook ainda `pending` (0 = desligado). */
+  inboxRelayIntervalMs: number;
+  /** Eco: responde "Eco: <texto>" a cada mensagem recebida (validação da T1.7). NUNCA em produção. */
+  echoEnabled: boolean;
 }
 
 export class WorkerConfigError extends Error {
@@ -56,6 +66,8 @@ const envSchema = z.object({
   WHATSAPP_API_BASE_URL: z.url({ error: 'precisa ser uma URL' }).optional(),
   WHATSAPP_RATE_LIMIT_PER_SECOND: z.coerce.number().positive().max(1000).default(80),
   WHATSAPP_RATE_LIMIT_MAX_WAIT_MS: z.coerce.number().int().min(0).max(60_000).default(5_000),
+  WORKER_INBOX_RELAY_INTERVAL_SECONDS: z.coerce.number().min(0).max(3600).optional(),
+  WORKER_ECHO_ENABLED: z.enum(['true', 'false']).default('false'),
 });
 
 export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerConfig {
@@ -72,6 +84,18 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
     );
   }
   const e = parsed.data;
+
+  let tokenCipher: TokenCipher | null = null;
+  try {
+    tokenCipher = createTokenCipherFromEnv(cleaned);
+  } catch (error) {
+    if (!(error instanceof TokenCryptoError)) throw error;
+    throw new WorkerConfigError([`TOKEN_ENCRYPTION_KEYS: ${error.message}`]);
+  }
+  if (e.NODE_ENV === 'production' && e.WORKER_ECHO_ENABLED === 'true') {
+    throw new WorkerConfigError(['WORKER_ECHO_ENABLED: o eco não pode ficar ligado em produção']);
+  }
+
   return {
     env: e.NODE_ENV,
     databaseUrl: e.DATABASE_URL,
@@ -86,5 +110,10 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
       ratePerSecond: e.WHATSAPP_RATE_LIMIT_PER_SECOND,
       rateLimitMaxWaitMs: e.WHATSAPP_RATE_LIMIT_MAX_WAIT_MS,
     },
+    tokenCipher,
+    // Padrão: 5 s (0 nos testes, para não enfileirar eventos de outros testes).
+    inboxRelayIntervalMs:
+      (e.WORKER_INBOX_RELAY_INTERVAL_SECONDS ?? (e.NODE_ENV === 'test' ? 0 : 5)) * 1000,
+    echoEnabled: e.WORKER_ECHO_ENABLED === 'true',
   };
 }

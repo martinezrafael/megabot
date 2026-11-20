@@ -1,4 +1,5 @@
 import {
+  TokenCryptoError,
   WindowClosedError,
   createLogMetrics,
   findTenantWhatsappNumber,
@@ -74,8 +75,16 @@ export class RateLimitedError extends Error {
 export type OutboundClient = Pick<WhatsAppClient, 'sendText' | 'sendTemplate' | 'sendMedia'>;
 
 export interface OutboundMessageDeps {
-  /** Token da Cloud API (nunca é logado). */
-  accessToken: string;
+  /**
+   * Token GLOBAL da Cloud API (legado/dev): usado só quando o número do tenant NÃO tem token próprio.
+   * Nunca é logado.
+   */
+  accessToken?: string | undefined;
+  /**
+   * Token do número do tenant (decifrado do banco, T1.7). `null` = esse número não tem token próprio.
+   * Se lançar `TokenCryptoError`, a mensagem falha de vez (`token_unavailable`).
+   */
+  resolveAccessToken?: (tenantId: string, phoneNumberId: string) => Promise<string | null>;
   baseUrl?: string | undefined;
   /** Mensagens por segundo por número. */
   ratePerSecond: number;
@@ -198,6 +207,29 @@ export function createOutboundMessageHandler(
       );
     }
 
+    // 2b) Token: o do número (cifrado no banco) e, na falta dele, o global do ambiente.
+    let accessToken: string | null;
+    try {
+      accessToken =
+        (await deps.resolveAccessToken?.(tenantId, number.phoneNumberId)) ??
+        deps.accessToken ??
+        null;
+    } catch (error) {
+      if (!(error instanceof TokenCryptoError)) throw error; // falha de banco etc.: tenta de novo
+      return failPermanently(
+        'token_unavailable',
+        new NonRetryableError(
+          'Não foi possível decifrar o token do número (chave ausente, trocada ou dado adulterado).',
+        ),
+      );
+    }
+    if (!accessToken) {
+      return failPermanently(
+        'no_access_token',
+        new NonRetryableError('O número não tem token de acesso (conecte-o com o token).'),
+      );
+    }
+
     // 3) Montar a chamada (valida o conteúdo antes de gastar ficha).
     let send: (client: OutboundClient) => Promise<SendResult>;
     try {
@@ -224,7 +256,7 @@ export function createOutboundMessageHandler(
 
       // 5) Enviar.
       const client = createClient({
-        accessToken: deps.accessToken,
+        accessToken,
         phoneNumberId: number.phoneNumberId,
         tenantId,
         ...(deps.baseUrl ? { baseUrl: deps.baseUrl } : {}),

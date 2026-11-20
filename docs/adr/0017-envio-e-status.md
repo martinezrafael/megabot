@@ -1,6 +1,6 @@
 # ADR 0017 — Envio de mensagens, rate limit e status
 
-- **Status:** Aceita (credenciais por tenant seguem pendentes)
+- **Status:** Aceita (credenciais por tenant resolvidas na [ADR 0018](0018-token-por-numero-envelope.md))
 - **Data:** 2026-11-19
 - **Contexto da task:** T1.6 (usa o [ADR 0010](0010-janela-de-conversa-24h.md), o [ADR 0012](0012-pacote-whatsapp.md) e o [ADR 0015](0015-modelo-de-conversas.md))
 

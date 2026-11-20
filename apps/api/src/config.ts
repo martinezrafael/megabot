@@ -1,3 +1,4 @@
+import { TokenCryptoError, createTokenCipherFromEnv, type TokenCipher } from '@megabot/database';
 import { z } from 'zod';
 
 /**
@@ -45,6 +46,12 @@ export interface AppConfig {
    * o GET de verificação responde 403. Em produção os dois são obrigatórios.
    */
   whatsapp: { appSecret: string | undefined; verifyToken: string | undefined };
+  /**
+   * Cifrador dos tokens de acesso do WhatsApp (envelope encryption, ADR 0018), montado a partir de
+   * `TOKEN_ENCRYPTION_KEYS`. `null` = sem chave: a rota de conexão de número responde 503.
+   * Obrigatório em produção.
+   */
+  tokenCipher: TokenCipher | null;
 }
 
 /** Erro lançado quando a configuração é inválida. A mensagem já vem formatada para o terminal. */
@@ -165,6 +172,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
 
   const e = parsed.data;
+
+  let tokenCipher: TokenCipher | null = null;
+  try {
+    tokenCipher = createTokenCipherFromEnv(withoutEmptyValues(env));
+  } catch (error) {
+    if (!(error instanceof TokenCryptoError)) throw error;
+    throw new ConfigError([`TOKEN_ENCRYPTION_KEYS: ${error.message}`]);
+  }
+  if (!tokenCipher && e.NODE_ENV === 'production') {
+    throw new ConfigError(['TOKEN_ENCRYPTION_KEYS: obrigatória em produção']);
+  }
+
   return {
     env: e.NODE_ENV,
     port: e.PORT,
@@ -193,5 +212,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     trustProxy: parseTrustProxy(e.TRUST_PROXY),
     swaggerEnabled: e.SWAGGER_ENABLED ? e.SWAGGER_ENABLED === 'true' : e.NODE_ENV !== 'production',
     whatsapp: { appSecret: e.WHATSAPP_APP_SECRET, verifyToken: e.WHATSAPP_VERIFY_TOKEN },
+    tokenCipher,
   };
 }
