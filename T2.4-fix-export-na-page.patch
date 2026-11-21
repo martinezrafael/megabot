@@ -1,0 +1,155 @@
+diff --git a/apps/web/src/app/(app)/agent/page.tsx b/apps/web/src/app/(app)/agent/page.tsx
+index 1474dea..b284965 100644
+--- a/apps/web/src/app/(app)/agent/page.tsx
++++ b/apps/web/src/app/(app)/agent/page.tsx
+@@ -1,30 +1,17 @@
+-import { cookies, headers } from 'next/headers';
+ import { redirect } from 'next/navigation';
+ import { AgentConfigFormPanel } from '@/components/agent-config-form';
+ import { AgentVersionHistoryPanel } from '@/components/agent-version-history';
+-import { parseWebEnv } from '@/env';
++import { apiOptions } from '@/lib/api-options';
+ import {
+   fetchAgentConfig,
+   fetchAgentConfigOptions,
+   fetchAgentConfigVersions,
+-  type AgentFetchOptions,
+ } from '@/lib/agent-config';
+ import { getMe } from '@/lib/server-session';
+ 
+ export const dynamic = 'force-dynamic';
+ export const metadata = { title: 'Agente · Megabot' };
+ 
+-/** Opções de requisição à API, repassando o cookie de sessão de quem está vendo a tela. */
+-async function agentOptions(): Promise<AgentFetchOptions> {
+-  const [cookieStore, requestHeaders] = await Promise.all([cookies(), headers()]);
+-  return {
+-    apiUrl: parseWebEnv(process.env).serverApiUrl,
+-    cookie: cookieStore.toString(),
+-    forwardedFor: requestHeaders.get('x-forwarded-for') ?? undefined,
+-    requestId: requestHeaders.get('x-request-id') ?? undefined,
+-  };
+-}
+-
+ /**
+  * Configuração do agente (T2.4): como ele se chama, como fala, o que pode fazer e o que não pode.
+  * Cada salvamento cria uma versão; o histórico embaixo permite voltar para qualquer uma delas.
+@@ -33,7 +20,7 @@ export default async function AgentPage() {
+   const me = await getMe();
+   if (!me) redirect('/sign-in');
+ 
+-  const options = await agentOptions();
++  const options = await apiOptions();
+   const [config, catalog, history] = await Promise.all([
+     fetchAgentConfig(options),
+     fetchAgentConfigOptions(options),
+diff --git a/apps/web/src/app/(app)/knowledge/[id]/page.tsx b/apps/web/src/app/(app)/knowledge/[id]/page.tsx
+index ffac97c..bdfa17e 100644
+--- a/apps/web/src/app/(app)/knowledge/[id]/page.tsx
++++ b/apps/web/src/app/(app)/knowledge/[id]/page.tsx
+@@ -3,6 +3,7 @@ import { notFound, redirect } from 'next/navigation';
+ import { AutoRefresh } from '@/components/auto-refresh';
+ import { KnowledgeChunkList } from '@/components/knowledge-chunk-list';
+ import { KnowledgeSourceActions } from '@/components/knowledge-source-actions';
++import { apiOptions } from '@/lib/api-options';
+ import { fetchKnowledgeChunks, fetchKnowledgeSource } from '@/lib/knowledge';
+ import {
+   formatBytes,
+@@ -13,7 +14,6 @@ import {
+   statusLabel,
+ } from '@/lib/knowledge-format';
+ import { getMe } from '@/lib/server-session';
+-import { knowledgeOptions } from '../page';
+ 
+ export const dynamic = 'force-dynamic';
+ export const metadata = { title: 'Fonte · Megabot' };
+@@ -31,7 +31,7 @@ export default async function KnowledgeSourcePage({
+   const me = await getMe();
+   if (!me) redirect('/sign-in');
+ 
+-  const [{ id }, query, options] = await Promise.all([params, searchParams, knowledgeOptions()]);
++  const [{ id }, query, options] = await Promise.all([params, searchParams, apiOptions()]);
+   const page = Math.max(Number(query.pagina ?? '1') || 1, 1);
+ 
+   const source = await fetchKnowledgeSource(options, id);
+diff --git a/apps/web/src/app/(app)/knowledge/page.tsx b/apps/web/src/app/(app)/knowledge/page.tsx
+index 8a307b7..acca706 100644
+--- a/apps/web/src/app/(app)/knowledge/page.tsx
++++ b/apps/web/src/app/(app)/knowledge/page.tsx
+@@ -1,31 +1,15 @@
+-import { cookies, headers } from 'next/headers';
+ import { redirect } from 'next/navigation';
+ import { AutoRefresh } from '@/components/auto-refresh';
+ import { KnowledgeAddForms } from '@/components/knowledge-add-forms';
+ import { KnowledgeSourcesTable } from '@/components/knowledge-sources-table';
+-import { parseWebEnv } from '@/env';
+-import {
+-  fetchKnowledgeLimits,
+-  fetchKnowledgeSources,
+-  type KnowledgeFetchOptions,
+-} from '@/lib/knowledge';
++import { apiOptions } from '@/lib/api-options';
++import { fetchKnowledgeLimits, fetchKnowledgeSources } from '@/lib/knowledge';
+ import { hasWorkInProgress } from '@/lib/knowledge-format';
+ import { getMe } from '@/lib/server-session';
+ 
+ export const dynamic = 'force-dynamic';
+ export const metadata = { title: 'Base de conhecimento · Megabot' };
+ 
+-/** Opções de requisição à API, repassando o cookie de sessão de quem está vendo a tela. */
+-export async function knowledgeOptions(): Promise<KnowledgeFetchOptions> {
+-  const [cookieStore, requestHeaders] = await Promise.all([cookies(), headers()]);
+-  return {
+-    apiUrl: parseWebEnv(process.env).serverApiUrl,
+-    cookie: cookieStore.toString(),
+-    forwardedFor: requestHeaders.get('x-forwarded-for') ?? undefined,
+-    requestId: requestHeaders.get('x-request-id') ?? undefined,
+-  };
+-}
+-
+ /**
+  * Base de conhecimento: o que a empresa ensina ao assistente.
+  * Mostra as fontes com situação e progresso e, enquanto algo está sendo processado, atualiza sozinha.
+@@ -34,7 +18,7 @@ export default async function KnowledgePage() {
+   const me = await getMe();
+   if (!me) redirect('/sign-in');
+ 
+-  const options = await knowledgeOptions();
++  const options = await apiOptions();
+   const [sources, limits] = await Promise.all([
+     fetchKnowledgeSources(options),
+     fetchKnowledgeLimits(options),
+diff --git a/apps/web/src/lib/api-options.ts b/apps/web/src/lib/api-options.ts
+new file mode 100644
+index 0000000..0016ab6
+--- /dev/null
++++ b/apps/web/src/lib/api-options.ts
+@@ -0,0 +1,28 @@
++import { cookies, headers } from 'next/headers';
++import { parseWebEnv } from '@/env';
++
++/**
++ * Opções de requisição à API para Server Components, repassando o cookie de sessão de quem está
++ * vendo a tela (e os cabeçalhos de rastreio).
++ *
++ * Mora aqui, e não dentro de uma `page.tsx`, porque o Next **não permite** que um arquivo de
++ * página exporte qualquer outra coisa além do que ele conhece (`default`, `metadata`, `dynamic`
++ * e companhia). Uma exportação extra numa página faz o `tsc` falhar na validação de rota que o
++ * `next build` gera em `.next/types` — com a mensagem "is not assignable to type 'never'".
++ */
++export interface ApiFetchOptions {
++  apiUrl: string;
++  cookie: string;
++  forwardedFor?: string;
++  requestId?: string;
++}
++
++export async function apiOptions(): Promise<ApiFetchOptions> {
++  const [cookieStore, requestHeaders] = await Promise.all([cookies(), headers()]);
++  return {
++    apiUrl: parseWebEnv(process.env).serverApiUrl,
++    cookie: cookieStore.toString(),
++    forwardedFor: requestHeaders.get('x-forwarded-for') ?? undefined,
++    requestId: requestHeaders.get('x-request-id') ?? undefined,
++  };
++}

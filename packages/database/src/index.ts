@@ -29,3 +29,4 @@ export * from './token-crypto';
 export * from './conversations';
 export * from './outbound';
 export * from './knowledge';
+export * from './agent-config';

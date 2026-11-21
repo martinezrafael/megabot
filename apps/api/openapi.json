@@ -1,6 +1,204 @@
 {
   "components": {
     "schemas": {
+      "AgentConfigDto": {
+        "properties": {
+          "active": {
+            "description": "true quando esta é a versão que o agente está usando (a de maior número)",
+            "type": "boolean"
+          },
+          "createdAt": {
+            "description": "Nulo quando version = 0 (padrão, nunca salvo)",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "createdByName": {
+            "description": "Quem salvou esta versão",
+            "nullable": true,
+            "type": "string"
+          },
+          "greeting": {
+            "example": "Oi! Eu sou a Bia, da Loja Modelo. Como posso ajudar?",
+            "type": "string"
+          },
+          "name": {
+            "example": "Bia",
+            "type": "string"
+          },
+          "restoredFromVersion": {
+            "description": "Preenchido quando esta versão nasceu de um \"restaurar versão N\"",
+            "example": 1,
+            "nullable": true,
+            "type": "number"
+          },
+          "rules": {
+            "description": "Regras de atendimento, na ordem em que a tela mostra",
+            "example": [
+              "Nunca prometa prazo que não está na base."
+            ],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "tone": {
+            "enum": [
+              "formal",
+              "neutro",
+              "amigavel",
+              "descontraido"
+            ],
+            "type": "string"
+          },
+          "tools": {
+            "description": "Chaves das ferramentas habilitadas (catálogo em GET /agent-config/options)",
+            "example": [
+              "base_conhecimento"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "version": {
+            "description": "1, 2, 3... por empresa. 0 significa que ainda não existe versão salva.",
+            "example": 3,
+            "type": "number"
+          }
+        },
+        "required": [
+          "version",
+          "name",
+          "tone",
+          "greeting",
+          "tools",
+          "rules",
+          "createdByName",
+          "restoredFromVersion",
+          "createdAt",
+          "active"
+        ],
+        "type": "object"
+      },
+      "AgentConfigOptionsDto": {
+        "properties": {
+          "maxGreetingLength": {
+            "example": 1000,
+            "type": "number"
+          },
+          "maxNameLength": {
+            "example": 80,
+            "type": "number"
+          },
+          "maxRuleLength": {
+            "example": 500,
+            "type": "number"
+          },
+          "maxRules": {
+            "example": 30,
+            "type": "number"
+          },
+          "tones": {
+            "items": {
+              "$ref": "#/components/schemas/AgentToneOptionDto"
+            },
+            "type": "array"
+          },
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/AgentToolOptionDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "tones",
+          "tools",
+          "maxNameLength",
+          "maxGreetingLength",
+          "maxRules",
+          "maxRuleLength"
+        ],
+        "type": "object"
+      },
+      "AgentConfigVersionPageDto": {
+        "properties": {
+          "activeVersion": {
+            "description": "Número da versão que está no ar (0 = nenhuma)",
+            "type": "number"
+          },
+          "items": {
+            "description": "Da mais nova para a mais antiga",
+            "items": {
+              "$ref": "#/components/schemas/AgentConfigDto"
+            },
+            "type": "array"
+          },
+          "total": {
+            "description": "Total de versões já salvas",
+            "type": "number"
+          }
+        },
+        "required": [
+          "total",
+          "activeVersion",
+          "items"
+        ],
+        "type": "object"
+      },
+      "AgentToneOptionDto": {
+        "properties": {
+          "hint": {
+            "description": "Como esse tom soa, em uma frase",
+            "type": "string"
+          },
+          "key": {
+            "example": "amigavel",
+            "type": "string"
+          },
+          "label": {
+            "example": "Amigável",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "hint"
+        ],
+        "type": "object"
+      },
+      "AgentToolOptionDto": {
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "key": {
+            "example": "base_conhecimento",
+            "type": "string"
+          },
+          "label": {
+            "example": "Consultar a base de conhecimento",
+            "type": "string"
+          },
+          "status": {
+            "description": "disponivel = o agente faz isso hoje; em_breve = está no mapa e NÃO pode ser habilitada",
+            "enum": [
+              "disponivel",
+              "em_breve"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "description",
+          "status"
+        ],
+        "type": "object"
+      },
       "ConnectWhatsappNumberBodyDto": {
         "properties": {
           "accessToken": {
@@ -709,6 +907,58 @@
         ],
         "type": "object"
       },
+      "SaveAgentConfigBodyDto": {
+        "properties": {
+          "greeting": {
+            "example": "Oi! Eu sou a Bia, da Loja Modelo.",
+            "maxLength": 1000,
+            "type": "string"
+          },
+          "name": {
+            "example": "Bia",
+            "maxLength": 80,
+            "type": "string"
+          },
+          "rules": {
+            "description": "Itens vazios são descartados",
+            "example": [
+              "Nunca prometa prazo que não está na base."
+            ],
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 30,
+            "type": "array"
+          },
+          "tone": {
+            "enum": [
+              "formal",
+              "neutro",
+              "amigavel",
+              "descontraido"
+            ],
+            "type": "string"
+          },
+          "tools": {
+            "description": "Só ferramentas com status \"disponivel\" são aceitas",
+            "example": [
+              "base_conhecimento"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "tone",
+          "greeting",
+          "tools",
+          "rules"
+        ],
+        "type": "object"
+      },
       "Session": {
         "properties": {
           "createdAt": {
@@ -1208,6 +1458,367 @@
         "summary": "Conectar (ou atualizar) o número do WhatsApp de uma empresa, guardando o token cifrado",
         "tags": [
           "admin"
+        ]
+      }
+    },
+    "/agent-config": {
+      "get": {
+        "description": "Quando a empresa nunca salvou nada, devolve os valores padrão com `version: 0` e `createdAt: null`.",
+        "operationId": "AgentConfigController_current",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentConfigDto"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Sem sessão válida"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Conta sem empresa associada"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "A configuração que está no ar",
+        "tags": [
+          "agent-config"
+        ]
+      },
+      "put": {
+        "description": "Cada salvamento insere uma versão; nada é sobrescrito. A versão nova entra no ar na hora.",
+        "operationId": "AgentConfigController_save",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveAgentConfigBodyDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentConfigDto"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Campo inválido, tom inexistente ou ferramenta indisponível"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Sem sessão válida"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Conta sem empresa associada"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Outra pessoa salvou no mesmo instante"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Salvar a configuração (cria uma versão nova)",
+        "tags": [
+          "agent-config"
+        ]
+      }
+    },
+    "/agent-config/options": {
+      "get": {
+        "description": "A tela monta o formulário a partir daqui. Ferramenta com status `em_breve` não pode ser habilitada.",
+        "operationId": "AgentConfigController_options",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentConfigOptionsDto"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Sem sessão válida"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Conta sem empresa associada"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Tons, catálogo de ferramentas e limites dos campos",
+        "tags": [
+          "agent-config"
+        ]
+      }
+    },
+    "/agent-config/versions": {
+      "get": {
+        "operationId": "AgentConfigController_history",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "example": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "example": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentConfigVersionPageDto"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Sem sessão válida"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Conta sem empresa associada"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Histórico de versões, da mais nova para a mais antiga",
+        "tags": [
+          "agent-config"
+        ]
+      }
+    },
+    "/agent-config/versions/{version}": {
+      "get": {
+        "operationId": "AgentConfigController_one",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentConfigDto"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Sem sessão válida"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Conta sem empresa associada"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Versão não encontrada"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "O conteúdo de uma versão",
+        "tags": [
+          "agent-config"
+        ]
+      }
+    },
+    "/agent-config/versions/{version}/restore": {
+      "post": {
+        "description": "Copia o conteúdo da versão informada para uma versão NOVA, que entra no ar. O histórico não é reescrito: o rollback aparece nele, com `restoredFromVersion` apontando para a origem.",
+        "operationId": "AgentConfigController_restore",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentConfigDto"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Sem sessão válida"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Conta sem empresa associada"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Versão não encontrada"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Essa versão já é a que está no ar"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Restaurar uma versão (rollback)",
+        "tags": [
+          "agent-config"
         ]
       }
     },

@@ -3,6 +3,7 @@ import { notFound, redirect } from 'next/navigation';
 import { AutoRefresh } from '@/components/auto-refresh';
 import { KnowledgeChunkList } from '@/components/knowledge-chunk-list';
 import { KnowledgeSourceActions } from '@/components/knowledge-source-actions';
+import { apiOptions } from '@/lib/api-options';
 import { fetchKnowledgeChunks, fetchKnowledgeSource } from '@/lib/knowledge';
 import {
   formatBytes,
@@ -13,7 +14,6 @@ import {
   statusLabel,
 } from '@/lib/knowledge-format';
 import { getMe } from '@/lib/server-session';
-import { knowledgeOptions } from '../page';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Fonte · Megabot' };
@@ -31,7 +31,7 @@ export default async function KnowledgeSourcePage({
   const me = await getMe();
   if (!me) redirect('/sign-in');
 
-  const [{ id }, query, options] = await Promise.all([params, searchParams, knowledgeOptions()]);
+  const [{ id }, query, options] = await Promise.all([params, searchParams, apiOptions()]);
   const page = Math.max(Number(query.pagina ?? '1') || 1, 1);
 
   const source = await fetchKnowledgeSource(options, id);

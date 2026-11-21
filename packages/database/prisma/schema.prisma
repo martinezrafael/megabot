@@ -29,6 +29,7 @@ model Tenant {
   webhookEvents       WebhookEvent[]
   contacts            Contact[]
   knowledgeSources    KnowledgeSource[]
+  agentConfigs        AgentConfig[]
 
   @@map("tenants")
 }
@@ -44,6 +45,7 @@ model User {
   memberships   Membership[]
   sessions      Session[]
   accounts      Account[]
+  agentConfigs  AgentConfig[]
 
   @@map("users")
 }
@@ -331,4 +333,46 @@ model KnowledgeChunk {
   @@unique([tenantId, sourceId, position])
   @@index([tenantId, embeddingStale])
   @@map("knowledge_chunks")
+}
+
+/// Configuração do agente de um tenant, VERSIONADA (T2.4).
+///
+/// A tabela guarda o histórico inteiro: cada salvamento insere uma linha nova com
+/// `version = último + 1`. Nada é atualizado nem apagado, então o histórico é confiável por
+/// construção. **A versão ativa é sempre a de maior `version`** — não existe flag de "ativa",
+/// logo não existe o estado inválido de duas ativas (ou nenhuma).
+///
+/// Restaurar uma versão antiga também cria uma versão nova (cópia do conteúdo, com
+/// `restoredFromVersion` apontando para a origem): o rollback entra no histórico como um
+/// evento, em vez de reescrevê-lo.
+model AgentConfig {
+  id       String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  /// 1, 2, 3... por tenant. Único junto com tenant_id.
+  version  Int
+
+  /// Nome pelo qual o bot se apresenta.
+  name     String
+  /// formal | neutro | amigavel | descontraido (CHECK no banco).
+  tone     String
+  /// Primeira mensagem / como o bot se apresenta.
+  greeting String
+  /// Chaves das ferramentas habilitadas (catálogo em src/agent-config.ts).
+  tools    String[] @default([])
+  /// Regras de atendimento, uma por item, na ordem em que a tela mostra.
+  rules    String[] @default([])
+
+  /// Quem salvou. Fica nulo se o usuário for apagado — o histórico não se perde por isso.
+  createdByUserId String? @map("created_by_user_id") @db.Uuid
+  /// Versão copiada, quando esta versão nasceu de um rollback.
+  restoredFromVersion Int? @map("restored_from_version")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy User?  @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, version])
+  @@index([tenantId, createdAt])
+  @@map("agent_configs")
 }

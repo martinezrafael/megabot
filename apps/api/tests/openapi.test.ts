@@ -24,6 +24,11 @@ describe('Contrato OpenAPI', () => {
       '/knowledge/sources/{id}/reingest',
       '/knowledge/sources/{id}/chunks',
       '/knowledge/chunks/{chunkId}',
+      '/agent-config',
+      '/agent-config/options',
+      '/agent-config/versions',
+      '/agent-config/versions/{version}',
+      '/agent-config/versions/{version}/restore',
     ]) {
       assert.ok(spec.paths[route], `${route} ausente no contrato`);
     }
@@ -35,6 +40,11 @@ describe('Contrato OpenAPI', () => {
         .filter((n) => n.endsWith('Dto'))
         .sort(),
       [
+        'AgentConfigDto',
+        'AgentConfigOptionsDto',
+        'AgentConfigVersionPageDto',
+        'AgentToneOptionDto',
+        'AgentToolOptionDto',
         'ConnectWhatsappNumberBodyDto',
         'ConnectWhatsappNumberResponseDto',
         'CreateKnowledgeSourceBodyDto',
@@ -53,6 +63,7 @@ describe('Contrato OpenAPI', () => {
         'QueueOverviewDto',
         'QueuesSnapshotDto',
         'ReadinessResponseDto',
+        'SaveAgentConfigBodyDto',
         'UpdateKnowledgeChunkBodyDto',
         'WebhookAckDto',
         'WhatsappConnectionDto',

@@ -1,30 +1,14 @@
-import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { AutoRefresh } from '@/components/auto-refresh';
 import { KnowledgeAddForms } from '@/components/knowledge-add-forms';
 import { KnowledgeSourcesTable } from '@/components/knowledge-sources-table';
-import { parseWebEnv } from '@/env';
-import {
-  fetchKnowledgeLimits,
-  fetchKnowledgeSources,
-  type KnowledgeFetchOptions,
-} from '@/lib/knowledge';
+import { apiOptions } from '@/lib/api-options';
+import { fetchKnowledgeLimits, fetchKnowledgeSources } from '@/lib/knowledge';
 import { hasWorkInProgress } from '@/lib/knowledge-format';
 import { getMe } from '@/lib/server-session';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Base de conhecimento · Megabot' };
-
-/** Opções de requisição à API, repassando o cookie de sessão de quem está vendo a tela. */
-export async function knowledgeOptions(): Promise<KnowledgeFetchOptions> {
-  const [cookieStore, requestHeaders] = await Promise.all([cookies(), headers()]);
-  return {
-    apiUrl: parseWebEnv(process.env).serverApiUrl,
-    cookie: cookieStore.toString(),
-    forwardedFor: requestHeaders.get('x-forwarded-for') ?? undefined,
-    requestId: requestHeaders.get('x-request-id') ?? undefined,
-  };
-}
 
 /**
  * Base de conhecimento: o que a empresa ensina ao assistente.
@@ -34,7 +18,7 @@ export default async function KnowledgePage() {
   const me = await getMe();
   if (!me) redirect('/sign-in');
 
-  const options = await knowledgeOptions();
+  const options = await apiOptions();
   const [sources, limits] = await Promise.all([
     fetchKnowledgeSources(options),
     fetchKnowledgeLimits(options),

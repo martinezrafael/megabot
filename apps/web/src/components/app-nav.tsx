@@ -7,6 +7,7 @@ import { usePathname } from 'next/navigation';
 const ITEMS = [
   { href: '/dashboard', label: 'Início' },
   { href: '/knowledge', label: 'Base de conhecimento' },
+  { href: '/agent', label: 'Agente' },
   { href: '/settings', label: 'Conta' },
 ];
 

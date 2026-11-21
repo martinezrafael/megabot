@@ -28,6 +28,7 @@ um arquivo curto, versionado junto com o código, que explica **o que** foi deci
 | [0019](0019-pacote-ai.md)                   | Pacote ai: LLM, embeddings, custo e erros     | Aceita   |
 | [0020](0020-ingestao-base-conhecimento.md)  | Ingestão da base de conhecimento (pgvector)   | Aceita   |
 | [0021](0021-retriever.md)                   | Retriever: busca por tenant, limites e testes | Aceita   |
+| [0022](0022-configuracao-do-agente.md)      | Configuração do agente versionada (rollback)  | Aceita   |
 
 ## Status
 

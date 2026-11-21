@@ -68,7 +68,9 @@ O envio de mensagens e a leitura dos webhooks da Cloud API ficam em `packages/wh
 
 A ligação com o modelo de IA (chat com tool calling, embeddings, custo e erros) fica em `packages/ai`. Uso, configuração e erros: [packages/ai/README.md](packages/ai/README.md).
 
-A base de conhecimento (upload de arquivos, importação de páginas, extração de texto, divisão em trechos e embeddings no pgvector) fica em `packages/knowledge` + `packages/storage`, com a tela em `/knowledge`. Contrato da API: [docs/api/knowledge.md](docs/api/knowledge.md); decisões: [ADR 0020](docs/adr/0020-ingestao-base-conhecimento.md).
+A base de conhecimento (upload de arquivos, importação de páginas, extração de texto, divisão em trechos e embeddings no pgvector) fica em `packages/knowledge` + `packages/storage`, com a tela em `/knowledge`. Contrato da API: [docs/api/knowledge.md](docs/api/knowledge.md); decisões: [ADR 0020](docs/adr/0020-ingestao-base-conhecimento.md). A busca nessa base (trechos mais parecidos com a pergunta, dentro de limites de quantidade e de tokens) fica em `packages/retrieval`: [README](packages/retrieval/README.md) e [ADR 0021](docs/adr/0021-retriever.md).
+
+A configuração do agente (nome, tom, apresentação, ferramentas e regras) é **versionada**: cada salvamento cria uma versão e dá para voltar a qualquer uma delas, na tela `/agent`. Contrato da API: [docs/api/agent-config.md](docs/api/agent-config.md); decisões: [ADR 0022](docs/adr/0022-configuracao-do-agente.md).
 
 ---
 

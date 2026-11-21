@@ -56,6 +56,104 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agent-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A configuração que está no ar
+         * @description Quando a empresa nunca salvou nada, devolve os valores padrão com `version: 0` e `createdAt: null`.
+         */
+        get: operations["AgentConfigController_current"];
+        /**
+         * Salvar a configuração (cria uma versão nova)
+         * @description Cada salvamento insere uma versão; nada é sobrescrito. A versão nova entra no ar na hora.
+         */
+        put: operations["AgentConfigController_save"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent-config/options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Tons, catálogo de ferramentas e limites dos campos
+         * @description A tela monta o formulário a partir daqui. Ferramenta com status `em_breve` não pode ser habilitada.
+         */
+        get: operations["AgentConfigController_options"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent-config/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Histórico de versões, da mais nova para a mais antiga */
+        get: operations["AgentConfigController_history"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent-config/versions/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** O conteúdo de uma versão */
+        get: operations["AgentConfigController_one"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent-config/versions/{version}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restaurar uma versão (rollback)
+         * @description Copia o conteúdo da versão informada para uma versão NOVA, que entra no ar. O histórico não é reescrito: o rollback aparece nele, com `restoredFromVersion` apontando para a origem.
+         */
+        post: operations["AgentConfigController_restore"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/callback/{id}": {
         parameters: {
             query?: never;
@@ -734,6 +832,87 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AgentConfigDto: {
+            /** @description true quando esta é a versão que o agente está usando (a de maior número) */
+            active: boolean;
+            /**
+             * Format: date-time
+             * @description Nulo quando version = 0 (padrão, nunca salvo)
+             */
+            createdAt: string | null;
+            /** @description Quem salvou esta versão */
+            createdByName: string | null;
+            /** @example Oi! Eu sou a Bia, da Loja Modelo. Como posso ajudar? */
+            greeting: string;
+            /** @example Bia */
+            name: string;
+            /**
+             * @description Preenchido quando esta versão nasceu de um "restaurar versão N"
+             * @example 1
+             */
+            restoredFromVersion: number | null;
+            /**
+             * @description Regras de atendimento, na ordem em que a tela mostra
+             * @example [
+             *       "Nunca prometa prazo que não está na base."
+             *     ]
+             */
+            rules: string[];
+            /** @enum {string} */
+            tone: "formal" | "neutro" | "amigavel" | "descontraido";
+            /**
+             * @description Chaves das ferramentas habilitadas (catálogo em GET /agent-config/options)
+             * @example [
+             *       "base_conhecimento"
+             *     ]
+             */
+            tools: string[];
+            /**
+             * @description 1, 2, 3... por empresa. 0 significa que ainda não existe versão salva.
+             * @example 3
+             */
+            version: number;
+        };
+        AgentConfigOptionsDto: {
+            /** @example 1000 */
+            maxGreetingLength: number;
+            /** @example 80 */
+            maxNameLength: number;
+            /** @example 500 */
+            maxRuleLength: number;
+            /** @example 30 */
+            maxRules: number;
+            tones: components["schemas"]["AgentToneOptionDto"][];
+            tools: components["schemas"]["AgentToolOptionDto"][];
+        };
+        AgentConfigVersionPageDto: {
+            /** @description Número da versão que está no ar (0 = nenhuma) */
+            activeVersion: number;
+            /** @description Da mais nova para a mais antiga */
+            items: components["schemas"]["AgentConfigDto"][];
+            /** @description Total de versões já salvas */
+            total: number;
+        };
+        AgentToneOptionDto: {
+            /** @description Como esse tom soa, em uma frase */
+            hint: string;
+            /** @example amigavel */
+            key: string;
+            /** @example Amigável */
+            label: string;
+        };
+        AgentToolOptionDto: {
+            description: string;
+            /** @example base_conhecimento */
+            key: string;
+            /** @example Consultar a base de conhecimento */
+            label: string;
+            /**
+             * @description disponivel = o agente faz isso hoje; em_breve = está no mapa e NÃO pode ser habilitada
+             * @enum {string}
+             */
+            status: "disponivel" | "em_breve";
+        };
         ConnectWhatsappNumberBodyDto: {
             /**
              * Format: password
@@ -1018,6 +1197,28 @@ export interface components {
              */
             status: "ok" | "error" | "shutting_down";
         };
+        SaveAgentConfigBodyDto: {
+            /** @example Oi! Eu sou a Bia, da Loja Modelo. */
+            greeting: string;
+            /** @example Bia */
+            name: string;
+            /**
+             * @description Itens vazios são descartados
+             * @example [
+             *       "Nunca prometa prazo que não está na base."
+             *     ]
+             */
+            rules: string[];
+            /** @enum {string} */
+            tone: "formal" | "neutro" | "amigavel" | "descontraido";
+            /**
+             * @description Só ferramentas com status "disponivel" são aceitas
+             * @example [
+             *       "base_conhecimento"
+             *     ]
+             */
+            tools: string[];
+        };
         Session: {
             /** Format: date-time */
             createdAt: string;
@@ -1295,6 +1496,280 @@ export interface operations {
             };
             /** @description Criptografia de tokens não configurada no servidor */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+        };
+    };
+    AgentConfigController_current: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentConfigDto"];
+                };
+            };
+            /** @description Sem sessão válida */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Conta sem empresa associada */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+        };
+    };
+    AgentConfigController_save: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveAgentConfigBodyDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentConfigDto"];
+                };
+            };
+            /** @description Campo inválido, tom inexistente ou ferramenta indisponível */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Sem sessão válida */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Conta sem empresa associada */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Outra pessoa salvou no mesmo instante */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+        };
+    };
+    AgentConfigController_options: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentConfigOptionsDto"];
+                };
+            };
+            /** @description Sem sessão válida */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Conta sem empresa associada */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+        };
+    };
+    AgentConfigController_history: {
+        parameters: {
+            query?: {
+                offset?: unknown;
+                limit?: unknown;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentConfigVersionPageDto"];
+                };
+            };
+            /** @description Sem sessão válida */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Conta sem empresa associada */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+        };
+    };
+    AgentConfigController_one: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentConfigDto"];
+                };
+            };
+            /** @description Sem sessão válida */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Conta sem empresa associada */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Versão não encontrada */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+        };
+    };
+    AgentConfigController_restore: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentConfigDto"];
+                };
+            };
+            /** @description Sem sessão válida */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Conta sem empresa associada */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Versão não encontrada */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Essa versão já é a que está no ar */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

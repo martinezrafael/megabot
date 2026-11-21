@@ -403,3 +403,60 @@ progress {
 .chunk .actions {
   margin-bottom: 0;
 }
+
+/*
+ * `fieldset` tem min-width: min-content por padrão no navegador e, por isso, NÃO encolhe: no
+ * celular ele empurra o formulário inteiro para fora do cartão (mesma história do input[type=file]
+ * mais acima). Vale para qualquer tela do app, não só para a do agente.
+ */
+.shell-main fieldset,
+.shell-main fieldset > * {
+  min-width: 0;
+}
+
+/*
+ * Configuração do agente (T2.4).
+ *
+ * Dentro do .card os campos são esticados para a largura toda, o que é certo para texto e errado
+ * para rádio e caixa de seleção: sem isto, a bolinha aparece sozinha, longe do rótulo.
+ */
+.option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+}
+.option input {
+  width: auto;
+  margin-top: 3px;
+}
+.option input:disabled {
+  cursor: not-allowed;
+}
+.option .muted {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.9rem;
+}
+.option:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+/* Uma regra por linha: o campo cresce, o "Remover" fica ao lado. */
+.rule-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.rule-row input {
+  flex: 1 1 260px;
+}

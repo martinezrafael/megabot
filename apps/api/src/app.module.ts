@@ -2,6 +2,7 @@ import { type DynamicModule, Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AdminModule } from './admin/admin.module';
+import { AgentConfigModule } from './agent/agent-config.module';
 import type { QueueInspectorPort } from './admin/admin-queues.service';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
 import type { AppConfig } from './config';
@@ -45,6 +46,7 @@ export class AppModule {
         HealthModule.register({ ping: options.dbPing }),
         MeModule,
         KnowledgeModule,
+        AgentConfigModule,
         AdminModule.register({ inspector: options.queueInspector }),
         WhatsappWebhookModule,
       ],
