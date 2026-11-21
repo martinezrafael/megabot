@@ -56,6 +56,16 @@ export interface WorkerConfig {
     /** Trechos por chamada ao provedor de embeddings. */
     embedBatchSize: number;
   };
+  /**
+   * Limites da busca na base (T2.3). Ficam na configuração para dar para ajustar em produção sem
+   * recompilar: se as respostas estiverem vindo curtas demais (ou caras demais), é aqui que se mexe.
+   */
+  retrieval: {
+    maxChunks: number;
+    maxTokens: number;
+    minSimilarity: number;
+    maxPerSource: number;
+  };
 }
 
 export class WorkerConfigError extends Error {
@@ -92,6 +102,10 @@ const envSchema = z.object({
   KNOWLEDGE_CHUNK_MAX_CHARS: z.coerce.number().int().min(200).max(8000).default(1200),
   KNOWLEDGE_CHUNK_OVERLAP_CHARS: z.coerce.number().int().min(0).max(2000).default(150),
   KNOWLEDGE_EMBED_BATCH_SIZE: z.coerce.number().int().min(1).max(256).default(32),
+  RETRIEVAL_MAX_CHUNKS: z.coerce.number().int().min(1).max(50).default(6),
+  RETRIEVAL_MAX_TOKENS: z.coerce.number().int().min(100).max(50_000).default(1200),
+  RETRIEVAL_MIN_SIMILARITY: z.coerce.number().min(0).max(1).default(0.35),
+  RETRIEVAL_MAX_PER_SOURCE: z.coerce.number().int().min(1).max(20).default(3),
 });
 
 export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerConfig {
@@ -169,6 +183,12 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
       chunkMaxChars: e.KNOWLEDGE_CHUNK_MAX_CHARS,
       chunkOverlapChars: e.KNOWLEDGE_CHUNK_OVERLAP_CHARS,
       embedBatchSize: e.KNOWLEDGE_EMBED_BATCH_SIZE,
+    },
+    retrieval: {
+      maxChunks: e.RETRIEVAL_MAX_CHUNKS,
+      maxTokens: e.RETRIEVAL_MAX_TOKENS,
+      minSimilarity: e.RETRIEVAL_MIN_SIMILARITY,
+      maxPerSource: e.RETRIEVAL_MAX_PER_SOURCE,
     },
   };
 }

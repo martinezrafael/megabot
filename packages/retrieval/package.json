@@ -1,0 +1,26 @@
+{
+  "name": "@megabot/retrieval",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Encontra na base de conhecimento do tenant os trechos mais parecidos com a pergunta, dentro de limites de quantidade e de tokens",
+  "main": "./dist/index.js",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "swc src -d dist --strip-leading-paths --config-file ../config/swc/.swcrc -C module.type=commonjs",
+    "lint": "eslint .",
+    "check-types": "tsc --noEmit",
+    "test": "node --import tsx --test --test-concurrency=1 \"tests/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@megabot/ai": "workspace:*",
+    "@megabot/database": "workspace:*",
+    "gpt-tokenizer": "^4.1.2"
+  },
+  "devDependencies": {
+    "@megabot/eslint-config": "workspace:*",
+    "@megabot/tsconfig": "workspace:*",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.0.0"
+  }
+}

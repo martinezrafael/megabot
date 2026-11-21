@@ -11,13 +11,15 @@
     "check-types": "tsc --noEmit",
     "test": "node --env-file=../../.env --import tsx --test --test-concurrency=1 \"tests/**/*.test.ts\"",
     "inbound:enqueue-pending": "tsx --env-file=../../.env scripts/enqueue-pending.ts",
-    "outbound:send-test": "tsx --env-file=../../.env scripts/send-test.ts"
+    "outbound:send-test": "tsx --env-file=../../.env scripts/send-test.ts",
+    "knowledge:search": "node --env-file=../../.env --import tsx scripts/knowledge-search.ts"
   },
   "dependencies": {
     "@megabot/ai": "workspace:*",
     "@megabot/database": "workspace:*",
     "@megabot/knowledge": "workspace:*",
     "@megabot/queue": "workspace:*",
+    "@megabot/retrieval": "workspace:*",
     "@megabot/storage": "workspace:*",
     "@megabot/whatsapp": "workspace:*",
     "pino": "^10.4.0",

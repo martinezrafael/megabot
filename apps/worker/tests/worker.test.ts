@@ -14,12 +14,21 @@ const DATABASE_URL =
   'postgresql://megabot_app:megabot_pass@localhost:5432/megabot?schema=public';
 const TENANT = '11111111-1111-4111-8111-111111111111';
 
-async function waitFor<T>(check: () => T | Promise<T>, what: string, timeoutMs = 20_000) {
+async function waitFor<T>(
+  check: () => T | Promise<T>,
+  what: string,
+  timeoutMs = 20_000,
+  /** Detalhe a juntar na mensagem quando o tempo acabar (ex.: o que o processo filho imprimiu). */
+  detalhe?: () => string,
+) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const value = await check();
     if (value) return value as NonNullable<T>;
-    if (Date.now() > deadline) throw new Error(`Tempo esgotado: ${what}`);
+    if (Date.now() > deadline) {
+      const extra = detalhe?.();
+      throw new Error(`Tempo esgotado: ${what}${extra ? `\n${extra}` : ''}`);
+    }
     await new Promise((r) => setTimeout(r, 100));
   }
 }
@@ -108,7 +117,13 @@ describe('main.ts como processo (sinais)', () => {
     const child = spawn(process.execPath, ['--import', 'tsx', 'src/main.ts'], {
       cwd,
       env: {
-        ...process.env,
+        // Env MÍNIMO de propósito. O `test` do worker roda com `--env-file=../../.env`, então o
+        // .env da máquina entra no process.env; herdar isso num filho com NODE_ENV=production faz
+        // o worker morrer na largada por causa de QUALQUER variável que a máquina tenha (eco
+        // ligado, OPENAI_API_KEY sem os modelos, storage apontando para a nuvem...). Este teste é
+        // sobre SINAIS: ele passa só o que o worker precisa para subir, e nada mais.
+        PATH: process.env.PATH ?? '',
+        HOME: process.env.HOME ?? '',
         NODE_ENV: 'production',
         DATABASE_URL,
         QUEUE_SCHEMA: schema,
@@ -131,7 +146,12 @@ describe('main.ts como processo (sinais)', () => {
     const schema = newSchema();
     const { child, lines, exit } = launch(schema);
     try {
-      await waitFor(() => lines.some((l) => l.includes('worker.ready')), 'worker pronto', 30_000);
+      await waitFor(
+        () => lines.some((l) => l.includes('worker.ready')),
+        'worker pronto',
+        30_000,
+        () => `Saída do worker:\n${lines.join('\n') || '(o processo não imprimiu nada)'}`,
+      );
       child.kill('SIGTERM');
       const code = await exit;
       assert.equal(code, 0);
