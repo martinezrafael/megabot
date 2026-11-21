@@ -18,6 +18,7 @@ export {
   type QueueRetryPolicy,
 } from './definitions';
 export { NonRetryableError, describeError, isRetryable } from './errors';
+export { UUID_PATTERN, isUuid, jobIdFor } from './job-id';
 export {
   JOB_STATES,
   QueueInspector,

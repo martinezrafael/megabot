@@ -10,6 +10,7 @@ import { AuthGuard } from './auth/auth.guard';
 import { AuthModule } from './auth/auth.module';
 import type { DbPing } from './health/database.health';
 import { HealthModule } from './health/health.module';
+import { KnowledgeModule } from './knowledge/knowledge.module';
 import { createLoggerModule } from './logging/logger.module';
 import type { Mailer } from './mailer';
 import { MeModule } from './me/me.module';
@@ -43,6 +44,7 @@ export class AppModule {
         AuthModule.register(options),
         HealthModule.register({ ping: options.dbPing }),
         MeModule,
+        KnowledgeModule,
         AdminModule.register({ inspector: options.queueInspector }),
         WhatsappWebhookModule,
       ],

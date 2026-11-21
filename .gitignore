@@ -5,3 +5,6 @@ packages/database/src/generated
 dist
 .next
 *.tsbuildinfo
+
+# Arquivos da base de conhecimento no driver local (STORAGE_DRIVER=local)
+.data/

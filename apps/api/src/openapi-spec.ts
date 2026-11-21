@@ -1,6 +1,7 @@
 import type { OpenAPIObject } from '@nestjs/swagger';
 import { createApp } from './bootstrap';
 import type { AppConfig } from './config';
+import { LocalObjectStorage } from '@megabot/storage';
 import { createMemoryMailer } from './mailer';
 import { buildOpenApiDocument } from './openapi';
 
@@ -21,6 +22,8 @@ const SPEC_CONFIG: AppConfig = {
   swaggerEnabled: false,
   whatsapp: { appSecret: undefined, verifyToken: undefined },
   tokenCipher: null,
+  storage: new LocalObjectStorage('.data/openapi'),
+  knowledge: { maxUploadBytes: 20 * 1024 * 1024 },
 };
 
 /** Gera o contrato OpenAPI sem depender de .env, banco ou rede. */

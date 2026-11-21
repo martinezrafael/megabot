@@ -17,6 +17,13 @@ describe('Contrato OpenAPI', () => {
       '/admin/queues',
       '/admin/queues/{name}/jobs',
       '/admin/whatsapp/connections',
+      '/knowledge/limits',
+      '/knowledge/sources',
+      '/knowledge/sources/upload',
+      '/knowledge/sources/{id}',
+      '/knowledge/sources/{id}/reingest',
+      '/knowledge/sources/{id}/chunks',
+      '/knowledge/chunks/{chunkId}',
     ]) {
       assert.ok(spec.paths[route], `${route} ausente no contrato`);
     }
@@ -30,8 +37,13 @@ describe('Contrato OpenAPI', () => {
       [
         'ConnectWhatsappNumberBodyDto',
         'ConnectWhatsappNumberResponseDto',
+        'CreateKnowledgeSourceBodyDto',
         'ErrorResponseDto',
         'JobSummaryDto',
+        'KnowledgeChunkDto',
+        'KnowledgeChunkPageDto',
+        'KnowledgeLimitsDto',
+        'KnowledgeSourceDto',
         'LivenessResponseDto',
         'MeResponseDto',
         'MeTenantDto',
@@ -41,6 +53,7 @@ describe('Contrato OpenAPI', () => {
         'QueueOverviewDto',
         'QueuesSnapshotDto',
         'ReadinessResponseDto',
+        'UpdateKnowledgeChunkBodyDto',
         'WebhookAckDto',
         'WhatsappConnectionDto',
       ],

@@ -296,3 +296,110 @@ dd {
   cursor: pointer;
   font: inherit;
 }
+
+/* ---------------------------------------------------------------------------
+   Base de conhecimento (T2.2)
+   --------------------------------------------------------------------------- */
+/*
+ * O quadro do app é um item de grid (body é grid): por padrão um item não encolhe abaixo do
+ * conteúdo (min-width: auto). Sem isto, uma tabela larga (a lista de fontes) estica o layout
+ * inteiro no celular e o navegador "afasta o zoom". Com min-width: 0, a tabela rola dentro da
+ * sua caixa e o resto da tela continua na largura do aparelho.
+ */
+.shell {
+  min-width: 0;
+}
+.table-wrap {
+  max-width: 100%;
+}
+
+/*
+ * Mesma história dentro dos formulários: um <input type="file"> tem largura natural grande e, como
+ * item de grid, não encolhe sozinho. Sem isto, o campo de arquivo vaza para fora da tela no celular.
+ */
+.shell-main form,
+.shell-main label {
+  min-width: 0;
+}
+.shell-main input,
+.shell-main textarea {
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* O .card padrão é estreito (telas de login). Dentro do app ele ocupa a largura toda. */
+.shell-main .card {
+  max-width: none;
+  margin-bottom: 24px;
+}
+textarea {
+  padding: 10px 12px;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  resize: vertical;
+}
+textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.tabs button[aria-selected='true'] {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  margin: 12px 0;
+}
+progress {
+  display: block;
+  width: 120px;
+  height: 6px;
+  margin-top: 6px;
+}
+.chunk-list {
+  display: grid;
+  gap: 12px;
+  padding: 0;
+  margin: 12px 0 0;
+  list-style: none;
+}
+.chunk {
+  padding: 14px 16px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.chunk header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.chunk-heading {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.chunk-content {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+.chunk .actions {
+  margin-bottom: 0;
+}

@@ -3,6 +3,7 @@ import type { Logger } from 'pino';
 import type { WorkerConfig } from './config';
 import { registerHandlers } from './handlers';
 import { startInboxRelay, type InboxRelay } from './inbox-relay';
+import { startKnowledgeRelay, type KnowledgeRelay } from './knowledge-relay';
 
 export interface RunningWorker {
   /** Para de pegar jobs novos, espera os em andamento e fecha o banco. Seguro chamar várias vezes. */
@@ -30,6 +31,7 @@ export async function startWorker(
   });
 
   let relay: InboxRelay | undefined;
+  let knowledgeRelay: KnowledgeRelay | undefined;
   try {
     await client.start();
     const queues = await registerHandlers(client, config, logger);
@@ -40,10 +42,17 @@ export async function startWorker(
         intervalMs: config.inboxRelayIntervalMs,
         onlyTenantIds: options.relayTenantIds,
       });
+      knowledgeRelay = startKnowledgeRelay({
+        client,
+        logger,
+        intervalMs: config.inboxRelayIntervalMs,
+        onlyTenantIds: options.relayTenantIds,
+      });
     }
     logger.info({ event: 'worker.ready', handlers: queues }, 'Worker pronto');
   } catch (error) {
     relay?.stop();
+    knowledgeRelay?.stop();
     await client.stop({ timeoutMs: 1_000 }).catch(() => undefined);
     throw error;
   }
@@ -54,6 +63,7 @@ export async function startWorker(
     stop() {
       stopping ??= (async () => {
         relay?.stop();
+        knowledgeRelay?.stop();
         logger.info({ event: 'worker.stopping' }, 'Desligando: aguardando jobs em andamento');
         await client.stop({ timeoutMs: config.shutdownTimeoutMs });
         logger.info({ event: 'worker.stopped' }, 'Worker encerrado');

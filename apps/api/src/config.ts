@@ -1,4 +1,5 @@
 import { TokenCryptoError, createTokenCipherFromEnv, type TokenCipher } from '@megabot/database';
+import { StorageError, createStorageFromEnv, type ObjectStorage } from '@megabot/storage';
 import { z } from 'zod';
 
 /**
@@ -52,6 +53,12 @@ export interface AppConfig {
    * Obrigatório em produção.
    */
   tokenCipher: TokenCipher | null;
+  /** Onde os arquivos enviados para a base de conhecimento ficam (R2/S3 ou disco local). */
+  storage: ObjectStorage;
+  knowledge: {
+    /** Tamanho máximo de um arquivo enviado para a base, em bytes. */
+    maxUploadBytes: number;
+  };
 }
 
 /** Erro lançado quando a configuração é inválida. A mensagem já vem formatada para o terminal. */
@@ -119,6 +126,14 @@ const envSchema = z
 
     WHATSAPP_APP_SECRET: z.string().optional(),
     WHATSAPP_VERIFY_TOKEN: z.string().min(8, 'precisa ter pelo menos 8 caracteres').optional(),
+
+    /** Base de conhecimento (T2.2): tamanho máximo de upload, em MB. */
+    KNOWLEDGE_MAX_UPLOAD_MB: z.coerce
+      .number({ error: 'precisa ser um número' })
+      .int()
+      .min(1)
+      .max(100)
+      .default(20),
   })
   .superRefine((env, ctx) => {
     if (Boolean(env.GOOGLE_CLIENT_ID) !== Boolean(env.GOOGLE_CLIENT_SECRET)) {
@@ -184,6 +199,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new ConfigError(['TOKEN_ENCRYPTION_KEYS: obrigatória em produção']);
   }
 
+  // Storage dos arquivos da base de conhecimento (padrão: disco local, para `pnpm dev` funcionar
+  // sem conta em nuvem). Configuração errada derruba a subida, como todo o resto.
+  let storage: ObjectStorage;
+  try {
+    storage = createStorageFromEnv(withoutEmptyValues(env));
+  } catch (error) {
+    if (!(error instanceof StorageError)) throw error;
+    throw new ConfigError([error.message]);
+  }
+
   return {
     env: e.NODE_ENV,
     port: e.PORT,
@@ -213,5 +238,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     swaggerEnabled: e.SWAGGER_ENABLED ? e.SWAGGER_ENABLED === 'true' : e.NODE_ENV !== 'production',
     whatsapp: { appSecret: e.WHATSAPP_APP_SECRET, verifyToken: e.WHATSAPP_VERIFY_TOKEN },
     tokenCipher,
+    storage,
+    knowledge: { maxUploadBytes: e.KNOWLEDGE_MAX_UPLOAD_MB * 1024 * 1024 },
   };
 }

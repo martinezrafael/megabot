@@ -555,6 +555,140 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/knowledge/chunks/{chunkId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Apagar um trecho */
+        delete: operations["KnowledgeController_deleteChunk"];
+        options?: never;
+        head?: never;
+        /**
+         * Editar o texto de um trecho
+         * @description O texto novo vale na hora. O embedding é recalculado pelo worker em seguida (enquanto isso, `embeddingStale` fica true).
+         */
+        patch: operations["KnowledgeController_updateChunk"];
+        trace?: never;
+    };
+    "/knowledge/limits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Limites de upload (tamanho e extensões aceitas) */
+        get: operations["KnowledgeController_limits"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/knowledge/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fontes da base de conhecimento, da mais nova para a mais antiga */
+        get: operations["KnowledgeController_listSources"];
+        put?: never;
+        /**
+         * Criar fonte a partir de uma URL ou de texto colado
+         * @description A fonte nasce com status `pending`; o worker processa em segundos (extrai, divide e gera embeddings).
+         */
+        post: operations["KnowledgeController_createSource"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/knowledge/sources/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Uma fonte (status, progresso, erro) */
+        get: operations["KnowledgeController_getSource"];
+        put?: never;
+        post?: never;
+        /** Apagar a fonte, seus trechos e o arquivo guardado */
+        delete: operations["KnowledgeController_deleteSource"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/knowledge/sources/{id}/chunks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Trechos gerados a partir da fonte */
+        get: operations["KnowledgeController_listChunks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/knowledge/sources/{id}/reingest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Processar a fonte de novo
+         * @description Refaz extração, divisão e embeddings. Edições manuais de trechos são descartadas.
+         */
+        post: operations["KnowledgeController_reingest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/knowledge/sources/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enviar um arquivo (PDF, HTML, texto, CSV/TSV ou XLSX)
+         * @description O corpo da requisição é o conteúdo do arquivo (bytes), não multipart. Informe `fileName` na query e o tipo em `Content-Type`. Limite e extensões aceitas vêm de `GET /knowledge/limits`.
+         */
+        post: operations["KnowledgeController_upload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/me": {
         parameters: {
             query?: never;
@@ -629,6 +763,22 @@ export interface components {
             /** @description true = conexão nova; false = atualizou uma existente */
             created: boolean;
         };
+        CreateKnowledgeSourceBodyDto: {
+            /**
+             * @description url = importar de um site; text = colar o conteúdo. Arquivo usa o endpoint /upload.
+             * @enum {string}
+             */
+            kind: "url" | "text";
+            /** @description Obrigatório quando kind = text (o conteúdo colado). */
+            text?: string;
+            /** @description Nome que aparece na tela. Sem ele, usamos o endereço ou o começo do texto. */
+            title?: string;
+            /**
+             * @description Obrigatório quando kind = url. Só http/https e endereços públicos.
+             * @example https://suaempresa.com.br/perguntas-frequentes
+             */
+            url?: string;
+        };
         ErrorResponseDto: {
             /** @description Informações extras (ex.: resultado do readiness check) */
             details?: Record<string, never>;
@@ -676,6 +826,89 @@ export interface components {
             state: "created" | "retry" | "active" | "completed" | "cancelled" | "failed";
             /** @description Empresa dona do job */
             tenantId: string | null;
+        };
+        KnowledgeChunkDto: {
+            charCount: number;
+            content: string;
+            /** @description Editado à mão */
+            edited: boolean;
+            embeddingModel: string | null;
+            /** @description O texto mudou e o embedding ainda é o antigo (será recalculado) */
+            embeddingStale: boolean;
+            /** @description Já tem embedding gerado */
+            hasEmbedding: boolean;
+            /** @description Seção de origem (ex.: "Página 2") */
+            heading: string | null;
+            /** Format: uuid */
+            id: string;
+            /** @description Ordem do trecho na fonte (0, 1, 2...) */
+            position: number;
+            /** Format: uuid */
+            sourceId: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        KnowledgeChunkPageDto: {
+            items: components["schemas"]["KnowledgeChunkDto"][];
+            /** @description Total de trechos da fonte */
+            total: number;
+        };
+        KnowledgeLimitsDto: {
+            /**
+             * @example [
+             *       ".pdf",
+             *       ".html",
+             *       ".txt",
+             *       ".md",
+             *       ".csv",
+             *       ".tsv",
+             *       ".xlsx"
+             *     ]
+             */
+            acceptedExtensions: string[];
+            /** @description Tamanho máximo de upload, em bytes */
+            maxUploadBytes: number;
+        };
+        KnowledgeSourceDto: {
+            byteSize: number | null;
+            /** @description Caracteres de texto extraídos */
+            charCount: number | null;
+            /** @description Trechos gerados */
+            chunkCount: number;
+            /** Format: date-time */
+            createdAt: string;
+            embeddingModel: string | null;
+            /**
+             * @description Código do erro da última ingestão
+             * @example sem_texto
+             */
+            errorCode: string | null;
+            /** @description Erro explicado para quem usa a tela */
+            errorMessage: string | null;
+            fileName: string | null;
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            kind: "upload" | "url" | "text";
+            /** Format: date-time */
+            lastIngestedAt: string | null;
+            mimeType: string | null;
+            /**
+             * @description 0 a 100
+             * @example 40
+             */
+            progress: number;
+            /** @example https://loja.com.br/trocas */
+            sourceUrl: string | null;
+            /**
+             * @description pending = na fila; processing = em andamento; ready = pronta; failed = falhou
+             * @enum {string}
+             */
+            status: "pending" | "processing" | "ready" | "failed";
+            /** @example Política de trocas.pdf */
+            title: string;
+            /** Format: date-time */
+            updatedAt: string;
         };
         LivenessResponseDto: {
             /** @example ok */
@@ -797,6 +1030,10 @@ export interface components {
             updatedAt: string;
             userAgent?: string;
             userId: string;
+        };
+        UpdateKnowledgeChunkBodyDto: {
+            /** @description Novo texto do trecho (1 a 8000 caracteres) */
+            content: string;
         };
         User: {
             /** Format: date-time */
@@ -2185,6 +2422,423 @@ export interface operations {
                 };
             };
             /** @description Alguma dependência está fora do ar */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+        };
+    };
+    KnowledgeController_deleteChunk: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Apagado */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Sem sessão válida */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Trecho não encontrado */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+        };
+    };
+    KnowledgeController_updateChunk: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateKnowledgeChunkBodyDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeChunkDto"];
+                };
+            };
+            /** @description Conteúdo inválido */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Sem sessão válida */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Trecho não encontrado */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+        };
+    };
+    KnowledgeController_limits: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeLimitsDto"];
+                };
+            };
+            /** @description Sem sessão válida */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+        };
+    };
+    KnowledgeController_listSources: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeSourceDto"][];
+                };
+            };
+            /** @description Sem sessão válida */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+        };
+    };
+    KnowledgeController_createSource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateKnowledgeSourceBodyDto"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeSourceDto"];
+                };
+            };
+            /** @description Corpo inválido ou URL recusada */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Sem sessão válida */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Conta sem empresa associada */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+        };
+    };
+    KnowledgeController_getSource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeSourceDto"];
+                };
+            };
+            /** @description Sem sessão válida */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Fonte não encontrada */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+        };
+    };
+    KnowledgeController_deleteSource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Apagada */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Sem sessão válida */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Fonte não encontrada */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+        };
+    };
+    KnowledgeController_listChunks: {
+        parameters: {
+            query?: {
+                offset?: unknown;
+                limit?: unknown;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeChunkPageDto"];
+                };
+            };
+            /** @description Sem sessão válida */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Fonte não encontrada */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+        };
+    };
+    KnowledgeController_reingest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeSourceDto"];
+                };
+            };
+            /** @description Sem sessão válida */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Fonte não encontrada */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Já está processando */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+        };
+    };
+    KnowledgeController_upload: {
+        parameters: {
+            query: {
+                title?: unknown;
+                fileName: unknown;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Bytes do arquivo */
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+                "application/pdf": string;
+                "text/csv": string;
+                "text/plain": string;
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeSourceDto"];
+                };
+            };
+            /** @description Arquivo vazio, grande demais ou de formato não suportado */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Sem sessão válida */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Arquivo maior que o limite */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Armazenamento indisponível ou não configurado */
             503: {
                 headers: {
                     [name: string]: unknown;
