@@ -8,8 +8,19 @@
 -- outra dimensão exige uma migration nova (ALTER do tipo) e reindexar tudo: é por isso que o
 -- tamanho está fixo aqui e a dimensão esperada é exportada pelo pacote database.
 
--- A extensão vem na imagem pgvector/pgvector:pg16 do docker-compose; aqui só a habilitamos.
-CREATE EXTENSION IF NOT EXISTS vector;
+-- A extensão vector vem na imagem pgvector/pgvector:pg16 e é habilitada por scripts/init-db.sql,
+-- que roda como SUPERUSUÁRIO (docker-entrypoint e CI). As migrations rodam como megabot_app, que
+-- não pode criar extensões: por isso aqui a gente só tenta, e se não puder, explica o que fazer.
+DO $$
+BEGIN
+  EXECUTE 'CREATE EXTENSION IF NOT EXISTS vector';
+EXCEPTION
+  WHEN insufficient_privilege THEN
+    RAISE EXCEPTION USING
+      MESSAGE = 'A extensão pgvector ainda não está habilitada neste banco.',
+      HINT = 'Rode uma vez como superusuário: docker exec megabot_postgres psql -U postgres -d megabot -c ''CREATE EXTENSION IF NOT EXISTS vector''';
+END
+$$;
 
 -- CreateTable
 CREATE TABLE "knowledge_sources" (
