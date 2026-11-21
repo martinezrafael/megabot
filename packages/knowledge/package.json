@@ -1,0 +1,30 @@
+{
+  "name": "@megabot/knowledge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Extração de texto (HTML, PDF, texto, planilha), divisão em trechos e importação por URL para a base de conhecimento",
+  "main": "./dist/index.js",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "swc src -d dist --strip-leading-paths --config-file ../config/swc/.swcrc -C module.type=commonjs",
+    "lint": "eslint .",
+    "check-types": "tsc --noEmit",
+    "test": "node --import tsx --test --test-concurrency=1 \"tests/**/*.test.ts\"",
+    "fixtures": "tsx scripts/make-fixtures.ts"
+  },
+  "dependencies": {
+    "cheerio": "^1.2.0",
+    "exceljs": "^4.4.0",
+    "unpdf": "^1.9.1",
+    "domhandler": "^5.0.3"
+  },
+  "devDependencies": {
+    "@megabot/eslint-config": "workspace:*",
+    "@megabot/tsconfig": "workspace:*",
+    "@types/node": "^22.0.0",
+    "pdfkit": "^0.17.2",
+    "tsx": "^4.19.0",
+    "typescript": "^5.0.0",
+    "@types/pdfkit": "^0.17.4"
+  }
+}

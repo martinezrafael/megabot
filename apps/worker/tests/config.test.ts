@@ -110,4 +110,70 @@ describe('config do worker', () => {
       /eco não pode/,
     );
   });
+
+  it('T2.2: IA ausente deixa a ingestão desligada; configuração pela metade falha', () => {
+    const sem = loadWorkerConfig({ ...base });
+    assert.equal(sem.ai, null);
+    assert.equal(sem.storage.driver, 'local');
+    assert.equal(sem.knowledge.chunkMaxChars, 1200);
+    assert.equal(sem.knowledge.chunkOverlapChars, 150);
+    assert.equal(sem.knowledge.embedBatchSize, 32);
+    assert.equal(sem.knowledge.maxBytes, 20 * 1024 * 1024);
+
+    // Só a chave, sem os modelos: erro na subida (nome de variável errado não passa batido).
+    assert.throws(
+      () => loadWorkerConfig({ ...base, OPENAI_API_KEY: 'sk-teste' }),
+      (error: unknown) => {
+        assert.ok(error instanceof WorkerConfigError);
+        assert.ok(error.issues.some((issue) => issue.includes('AI_EMBEDDING_MODEL')));
+        return true;
+      },
+    );
+
+    const completo = loadWorkerConfig({
+      ...base,
+      OPENAI_API_KEY: 'sk-teste',
+      AI_CHAT_MODEL: 'modelo-chat',
+      AI_EMBEDDING_MODEL: 'modelo-emb',
+      KNOWLEDGE_CHUNK_MAX_CHARS: '800',
+      KNOWLEDGE_CHUNK_OVERLAP_CHARS: '0',
+      KNOWLEDGE_EMBED_BATCH_SIZE: '8',
+      KNOWLEDGE_MAX_UPLOAD_MB: '5',
+    });
+    assert.equal(completo.ai?.embeddingModel, 'modelo-emb');
+    assert.equal(completo.knowledge.chunkMaxChars, 800);
+    assert.equal(completo.knowledge.chunkOverlapChars, 0);
+    assert.equal(completo.knowledge.embedBatchSize, 8);
+    assert.equal(completo.knowledge.maxBytes, 5 * 1024 * 1024);
+  });
+
+  it('T2.2: storage r2 incompleto falha; completo monta o driver', () => {
+    assert.throws(
+      () => loadWorkerConfig({ ...base, STORAGE_DRIVER: 'r2' }),
+      (error: unknown) => {
+        assert.ok(error instanceof WorkerConfigError);
+        assert.ok(error.issues.some((issue) => issue.includes('STORAGE_BUCKET')));
+        return true;
+      },
+    );
+    const config = loadWorkerConfig({
+      ...base,
+      STORAGE_DRIVER: 'r2',
+      STORAGE_BUCKET: 'megabot-kb',
+      STORAGE_ENDPOINT: 'https://conta.r2.cloudflarestorage.com',
+      STORAGE_ACCESS_KEY_ID: 'chave',
+      STORAGE_SECRET_ACCESS_KEY: 'segredo',
+    });
+    assert.equal(config.storage.driver, 'r2');
+  });
+
+  it('T2.2: valores fora da faixa são recusados', () => {
+    for (const env of [
+      { KNOWLEDGE_CHUNK_MAX_CHARS: '50' },
+      { KNOWLEDGE_EMBED_BATCH_SIZE: '0' },
+      { KNOWLEDGE_MAX_UPLOAD_MB: '500' },
+    ]) {
+      assert.throws(() => loadWorkerConfig({ ...base, ...env }), WorkerConfigError);
+    }
+  });
 });

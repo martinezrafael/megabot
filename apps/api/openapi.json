@@ -53,6 +53,35 @@
         ],
         "type": "object"
       },
+      "CreateKnowledgeSourceBodyDto": {
+        "properties": {
+          "kind": {
+            "description": "url = importar de um site; text = colar o conteúdo. Arquivo usa o endpoint /upload.",
+            "enum": [
+              "url",
+              "text"
+            ],
+            "type": "string"
+          },
+          "text": {
+            "description": "Obrigatório quando kind = text (o conteúdo colado).",
+            "type": "string"
+          },
+          "title": {
+            "description": "Nome que aparece na tela. Sem ele, usamos o endereço ou o começo do texto.",
+            "type": "string"
+          },
+          "url": {
+            "description": "Obrigatório quando kind = url. Só http/https e endereços públicos.",
+            "example": "https://suaempresa.com.br/perguntas-frequentes",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
       "ErrorResponseDto": {
         "properties": {
           "details": {
@@ -180,6 +209,223 @@
           "sourceJobId",
           "errorName",
           "errorMessage"
+        ],
+        "type": "object"
+      },
+      "KnowledgeChunkDto": {
+        "properties": {
+          "charCount": {
+            "type": "number"
+          },
+          "content": {
+            "type": "string"
+          },
+          "edited": {
+            "description": "Editado à mão",
+            "type": "boolean"
+          },
+          "embeddingModel": {
+            "nullable": true,
+            "type": "string"
+          },
+          "embeddingStale": {
+            "description": "O texto mudou e o embedding ainda é o antigo (será recalculado)",
+            "type": "boolean"
+          },
+          "hasEmbedding": {
+            "description": "Já tem embedding gerado",
+            "type": "boolean"
+          },
+          "heading": {
+            "description": "Seção de origem (ex.: \"Página 2\")",
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "position": {
+            "description": "Ordem do trecho na fonte (0, 1, 2...)",
+            "type": "number"
+          },
+          "sourceId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sourceId",
+          "position",
+          "content",
+          "charCount",
+          "heading",
+          "hasEmbedding",
+          "embeddingModel",
+          "embeddingStale",
+          "edited",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "KnowledgeChunkPageDto": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeChunkDto"
+            },
+            "type": "array"
+          },
+          "total": {
+            "description": "Total de trechos da fonte",
+            "type": "number"
+          }
+        },
+        "required": [
+          "total",
+          "items"
+        ],
+        "type": "object"
+      },
+      "KnowledgeLimitsDto": {
+        "properties": {
+          "acceptedExtensions": {
+            "example": [
+              ".pdf",
+              ".html",
+              ".txt",
+              ".md",
+              ".csv",
+              ".tsv",
+              ".xlsx"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "maxUploadBytes": {
+            "description": "Tamanho máximo de upload, em bytes",
+            "type": "number"
+          }
+        },
+        "required": [
+          "maxUploadBytes",
+          "acceptedExtensions"
+        ],
+        "type": "object"
+      },
+      "KnowledgeSourceDto": {
+        "properties": {
+          "byteSize": {
+            "nullable": true,
+            "type": "number"
+          },
+          "charCount": {
+            "description": "Caracteres de texto extraídos",
+            "nullable": true,
+            "type": "number"
+          },
+          "chunkCount": {
+            "description": "Trechos gerados",
+            "type": "number"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "embeddingModel": {
+            "nullable": true,
+            "type": "string"
+          },
+          "errorCode": {
+            "description": "Código do erro da última ingestão",
+            "example": "sem_texto",
+            "nullable": true,
+            "type": "string"
+          },
+          "errorMessage": {
+            "description": "Erro explicado para quem usa a tela",
+            "nullable": true,
+            "type": "string"
+          },
+          "fileName": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "upload",
+              "url",
+              "text"
+            ],
+            "type": "string"
+          },
+          "lastIngestedAt": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "mimeType": {
+            "nullable": true,
+            "type": "string"
+          },
+          "progress": {
+            "description": "0 a 100",
+            "example": 40,
+            "type": "number"
+          },
+          "sourceUrl": {
+            "example": "https://loja.com.br/trocas",
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "description": "pending = na fila; processing = em andamento; ready = pronta; failed = falhou",
+            "enum": [
+              "pending",
+              "processing",
+              "ready",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "example": "Política de trocas.pdf",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "title",
+          "status",
+          "progress",
+          "sourceUrl",
+          "fileName",
+          "mimeType",
+          "byteSize",
+          "charCount",
+          "chunkCount",
+          "embeddingModel",
+          "lastIngestedAt",
+          "errorCode",
+          "errorMessage",
+          "createdAt",
+          "updatedAt"
         ],
         "type": "object"
       },
@@ -501,6 +747,18 @@
           "createdAt",
           "updatedAt",
           "userId"
+        ],
+        "type": "object"
+      },
+      "UpdateKnowledgeChunkBodyDto": {
+        "properties": {
+          "content": {
+            "description": "Novo texto do trecho (1 a 8000 caracteres)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
         ],
         "type": "object"
       },
@@ -3335,6 +3593,575 @@
         "summary": "Readiness: as dependências (banco) estão respondendo",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/knowledge/chunks/{chunkId}": {
+      "delete": {
+        "operationId": "KnowledgeController_deleteChunk",
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": "Apagado"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Sem sessão válida"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Trecho não encontrado"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Apagar um trecho",
+        "tags": [
+          "knowledge"
+        ]
+      },
+      "patch": {
+        "description": "O texto novo vale na hora. O embedding é recalculado pelo worker em seguida (enquanto isso, `embeddingStale` fica true).",
+        "operationId": "KnowledgeController_updateChunk",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateKnowledgeChunkBodyDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeChunkDto"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Conteúdo inválido"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Sem sessão válida"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Trecho não encontrado"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Editar o texto de um trecho",
+        "tags": [
+          "knowledge"
+        ]
+      }
+    },
+    "/knowledge/limits": {
+      "get": {
+        "operationId": "KnowledgeController_limits",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeLimitsDto"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Sem sessão válida"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Limites de upload (tamanho e extensões aceitas)",
+        "tags": [
+          "knowledge"
+        ]
+      }
+    },
+    "/knowledge/sources": {
+      "get": {
+        "operationId": "KnowledgeController_listSources",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/KnowledgeSourceDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Sem sessão válida"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Fontes da base de conhecimento, da mais nova para a mais antiga",
+        "tags": [
+          "knowledge"
+        ]
+      },
+      "post": {
+        "description": "A fonte nasce com status `pending`; o worker processa em segundos (extrai, divide e gera embeddings).",
+        "operationId": "KnowledgeController_createSource",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateKnowledgeSourceBodyDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeSourceDto"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Corpo inválido ou URL recusada"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Sem sessão válida"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Conta sem empresa associada"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Criar fonte a partir de uma URL ou de texto colado",
+        "tags": [
+          "knowledge"
+        ]
+      }
+    },
+    "/knowledge/sources/{id}": {
+      "delete": {
+        "operationId": "KnowledgeController_deleteSource",
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": "Apagada"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Sem sessão válida"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Fonte não encontrada"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Apagar a fonte, seus trechos e o arquivo guardado",
+        "tags": [
+          "knowledge"
+        ]
+      },
+      "get": {
+        "operationId": "KnowledgeController_getSource",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeSourceDto"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Sem sessão válida"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Fonte não encontrada"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Uma fonte (status, progresso, erro)",
+        "tags": [
+          "knowledge"
+        ]
+      }
+    },
+    "/knowledge/sources/{id}/chunks": {
+      "get": {
+        "operationId": "KnowledgeController_listChunks",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "example": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "example": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeChunkPageDto"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Sem sessão válida"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Fonte não encontrada"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Trechos gerados a partir da fonte",
+        "tags": [
+          "knowledge"
+        ]
+      }
+    },
+    "/knowledge/sources/{id}/reingest": {
+      "post": {
+        "description": "Refaz extração, divisão e embeddings. Edições manuais de trechos são descartadas.",
+        "operationId": "KnowledgeController_reingest",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeSourceDto"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Sem sessão válida"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Fonte não encontrada"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Já está processando"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Processar a fonte de novo",
+        "tags": [
+          "knowledge"
+        ]
+      }
+    },
+    "/knowledge/sources/upload": {
+      "post": {
+        "description": "O corpo da requisição é o conteúdo do arquivo (bytes), não multipart. Informe `fileName` na query e o tipo em `Content-Type`. Limite e extensões aceitas vêm de `GET /knowledge/limits`.",
+        "operationId": "KnowledgeController_upload",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "title",
+            "required": false,
+            "schema": {}
+          },
+          {
+            "in": "query",
+            "name": "fileName",
+            "required": true,
+            "schema": {
+              "example": "politica-de-trocas.pdf"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "application/pdf": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "text/csv": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "text/plain": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "description": "Bytes do arquivo",
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeSourceDto"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Arquivo vazio, grande demais ou de formato não suportado"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Sem sessão válida"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Arquivo maior que o limite"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            },
+            "description": "Armazenamento indisponível ou não configurado"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Enviar um arquivo (PDF, HTML, texto, CSV/TSV ou XLSX)",
+        "tags": [
+          "knowledge"
         ]
       }
     },

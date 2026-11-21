@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 // Para adicionar uma tela: crie a pasta em app/(app)/, liste aqui e no matcher do middleware.
 const ITEMS = [
   { href: '/dashboard', label: 'Início' },
+  { href: '/knowledge', label: 'Base de conhecimento' },
   { href: '/settings', label: 'Conta' },
 ];
 

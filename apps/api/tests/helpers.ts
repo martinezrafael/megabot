@@ -1,7 +1,11 @@
+import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { LocalKeyring, TokenCipher, listUserTenants, prisma } from '@megabot/database';
+import { LocalObjectStorage } from '@megabot/storage';
 import { createApp } from '../src/bootstrap';
 import type { AppConfig } from '../src/config';
 import type { DestinationStream } from 'pino';
@@ -23,6 +27,8 @@ async function freePort(): Promise<number> {
 
 export interface TestApp {
   baseUrl: string;
+  /** Pasta temporária onde o storage local deste teste guarda os uploads. */
+  storageDir: string;
   mailer: ReturnType<typeof createMemoryMailer>;
   app: NestExpressApplication;
   /** fetch já apontando para a API, com Origin do front e cookie opcional. */
@@ -64,6 +70,9 @@ export function createTestConfig(port: number, overrides: Partial<AppConfig> = {
     swaggerEnabled: false,
     whatsapp: { appSecret: undefined, verifyToken: undefined },
     tokenCipher: new TokenCipher(new LocalKeyring({ test: randomBytes(32) }, 'test')),
+    // Storage em pasta temporária: cada teste tem a sua, apagada no close().
+    storage: new LocalObjectStorage(mkdtempSync(join(tmpdir(), 'megabot-api-uploads-'))),
+    knowledge: { maxUploadBytes: 20 * 1024 * 1024 },
     ...overrides,
   };
 }
@@ -103,8 +112,11 @@ export async function startTestApp(options: StartTestAppOptions = {}): Promise<T
   });
   await app.listen(port);
 
+  const storageDir = (config.storage as LocalObjectStorage & { root?: string }).root ?? '';
+
   return {
     baseUrl,
+    storageDir,
     mailer,
     app,
     newEmail: emailFor,
@@ -130,6 +142,7 @@ export async function startTestApp(options: StartTestAppOptions = {}): Promise<T
       await prisma.user.deleteMany({ where: { email: { in: emails } } });
       await app.close();
       await prisma.$disconnect();
+      if (storageDir) rmSync(storageDir, { recursive: true, force: true });
     },
   };
 }

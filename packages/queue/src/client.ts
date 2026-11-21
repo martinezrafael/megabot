@@ -8,6 +8,7 @@ import {
   type QueueDefinition,
 } from './definitions';
 import { describeError, isRetryable } from './errors';
+import { isUuid } from './job-id';
 import {
   METRIC,
   noopLogger,
@@ -189,6 +190,14 @@ export class QueueClient {
     options: EnqueueOptions = {},
   ): Promise<EnqueueResult> {
     const parsed = def.payload.parse(payload) as PayloadOf<D> & { tenantId: string };
+    // O pg-boss guarda o id do job numa coluna uuid: avisamos aqui, com o nome do culpado, em vez
+    // de deixar o Postgres responder "invalid input syntax for type uuid" no meio da fila.
+    if (options.jobId && !isUuid(options.jobId)) {
+      throw new Error(
+        `jobId precisa ser um UUID (recebi "${options.jobId}"). Use jobIdFor(...) para transformar ` +
+          'uma chave de idempotência em UUID.',
+      );
+    }
     const jobId = await this.boss.send(def.name, parsed, {
       ...(options.jobId ? { id: options.jobId } : {}),
       ...(options.startAfterSeconds ? { startAfter: options.startAfterSeconds } : {}),

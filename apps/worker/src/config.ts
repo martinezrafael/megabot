@@ -1,4 +1,7 @@
+import { AiConfigError, loadAiConfig, type AiConfig } from '@megabot/ai';
 import { TokenCryptoError, createTokenCipherFromEnv, type TokenCipher } from '@megabot/database';
+import { DEFAULT_MAX_BYTES } from '@megabot/knowledge';
+import { StorageError, createStorageFromEnv, type ObjectStorage } from '@megabot/storage';
 import { z } from 'zod';
 
 /**
@@ -36,6 +39,23 @@ export interface WorkerConfig {
   inboxRelayIntervalMs: number;
   /** Eco: responde "Eco: <texto>" a cada mensagem recebida (validação da T1.7). NUNCA em produção. */
   echoEnabled: boolean;
+  /**
+   * Provedor de IA (T2.1). `null` = nada configurado: a fila `knowledge.ingest` NÃO é processada
+   * (os jobs esperam) em vez de falhar tudo por falta de chave.
+   */
+  ai: AiConfig | null;
+  /** Onde ficam os arquivos enviados para a base de conhecimento (R2/S3 ou disco). */
+  storage: ObjectStorage;
+  knowledge: {
+    /** Tamanho máximo de um documento lido (arquivo ou página), em bytes. */
+    maxBytes: number;
+    /** Tamanho máximo de um trecho, em caracteres. */
+    chunkMaxChars: number;
+    /** Sobreposição entre trechos vizinhos, em caracteres. */
+    chunkOverlapChars: number;
+    /** Trechos por chamada ao provedor de embeddings. */
+    embedBatchSize: number;
+  };
 }
 
 export class WorkerConfigError extends Error {
@@ -68,6 +88,10 @@ const envSchema = z.object({
   WHATSAPP_RATE_LIMIT_MAX_WAIT_MS: z.coerce.number().int().min(0).max(60_000).default(5_000),
   WORKER_INBOX_RELAY_INTERVAL_SECONDS: z.coerce.number().min(0).max(3600).optional(),
   WORKER_ECHO_ENABLED: z.enum(['true', 'false']).default('false'),
+  KNOWLEDGE_MAX_UPLOAD_MB: z.coerce.number().int().min(1).max(100).default(20),
+  KNOWLEDGE_CHUNK_MAX_CHARS: z.coerce.number().int().min(200).max(8000).default(1200),
+  KNOWLEDGE_CHUNK_OVERLAP_CHARS: z.coerce.number().int().min(0).max(2000).default(150),
+  KNOWLEDGE_EMBED_BATCH_SIZE: z.coerce.number().int().min(1).max(256).default(32),
 });
 
 export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerConfig {
@@ -96,6 +120,29 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
     throw new WorkerConfigError(['WORKER_ECHO_ENABLED: o eco não pode ficar ligado em produção']);
   }
 
+  // IA: nada configurado -> null (a fila da base de conhecimento fica parada, com aviso no log).
+  // Configuração PELA METADE -> erro na subida, para um nome de modelo errado não passar batido.
+  const aiTouched = Boolean(
+    cleaned.OPENAI_API_KEY || cleaned.AI_CHAT_MODEL || cleaned.AI_EMBEDDING_MODEL,
+  );
+  let ai: AiConfig | null = null;
+  if (aiTouched) {
+    try {
+      ai = loadAiConfig(cleaned);
+    } catch (error) {
+      if (!(error instanceof AiConfigError)) throw error;
+      throw new WorkerConfigError(error.issues);
+    }
+  }
+
+  let storage: ObjectStorage;
+  try {
+    storage = createStorageFromEnv(cleaned);
+  } catch (error) {
+    if (!(error instanceof StorageError)) throw error;
+    throw new WorkerConfigError([error.message]);
+  }
+
   return {
     env: e.NODE_ENV,
     databaseUrl: e.DATABASE_URL,
@@ -115,5 +162,13 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
     inboxRelayIntervalMs:
       (e.WORKER_INBOX_RELAY_INTERVAL_SECONDS ?? (e.NODE_ENV === 'test' ? 0 : 5)) * 1000,
     echoEnabled: e.WORKER_ECHO_ENABLED === 'true',
+    ai,
+    storage,
+    knowledge: {
+      maxBytes: Math.min(e.KNOWLEDGE_MAX_UPLOAD_MB * 1024 * 1024, DEFAULT_MAX_BYTES * 5),
+      chunkMaxChars: e.KNOWLEDGE_CHUNK_MAX_CHARS,
+      chunkOverlapChars: e.KNOWLEDGE_CHUNK_OVERLAP_CHARS,
+      embedBatchSize: e.KNOWLEDGE_EMBED_BATCH_SIZE,
+    },
   };
 }

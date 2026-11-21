@@ -14,8 +14,11 @@
     "outbound:send-test": "tsx --env-file=../../.env scripts/send-test.ts"
   },
   "dependencies": {
+    "@megabot/ai": "workspace:*",
     "@megabot/database": "workspace:*",
+    "@megabot/knowledge": "workspace:*",
     "@megabot/queue": "workspace:*",
+    "@megabot/storage": "workspace:*",
     "@megabot/whatsapp": "workspace:*",
     "pino": "^10.4.0",
     "zod": "^4.6.7"

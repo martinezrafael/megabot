@@ -220,3 +220,15 @@ O webhook da Meta só traz o `phone_number_id`: ainda não sabemos o tenant. Mes
 **Chave de idempotência (`event_key`):** `message:<wamid>`, `status:<wamid>:<status>` (o mesmo wamid recebe sent, delivered e read) ou `error:<uuid>` (erros de sistema não têm id). **Ordem real:** use `event_at` (hora da Meta); `received_at` é só a ordem de chegada.
 
 Testes: `tests/integration/whatsapp-webhook.test.ts`. Rollback: `prisma/migrations/20261115150000_whatsapp_webhook/rollback.sql` (rode **antes** dos rollbacks das migrations anteriores).
+
+## Base de conhecimento (T2.2)
+
+`knowledge_sources` (fontes) e `knowledge_chunks` (trechos com `embedding vector(1536)`, índice HNSW), ambas
+com RLS. As funções ficam em `src/knowledge.ts`: `createKnowledgeSource`, `claimKnowledgeSourceForIngestion`,
+`replaceKnowledgeChunks` (troca todos os trechos numa transação), `listKnowledgeChunks`,
+`updateKnowledgeChunkContent` (marca `embedding_stale`), `setKnowledgeChunkEmbeddings` e
+`searchKnowledgeChunks` (busca por similaridade de cosseno). O vetor entra e sai em SQL puro: o Prisma não
+escreve o tipo `vector` (por isso o campo é `Unsupported` no schema).
+
+A dimensão aceita está em `KNOWLEDGE_EMBEDDING_DIMENSIONS` (1536) e é a do tipo da coluna: trocar de modelo de
+embedding exige migration e reindexar.

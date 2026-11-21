@@ -68,6 +68,8 @@ O envio de mensagens e a leitura dos webhooks da Cloud API ficam em `packages/wh
 
 A ligação com o modelo de IA (chat com tool calling, embeddings, custo e erros) fica em `packages/ai`. Uso, configuração e erros: [packages/ai/README.md](packages/ai/README.md).
 
+A base de conhecimento (upload de arquivos, importação de páginas, extração de texto, divisão em trechos e embeddings no pgvector) fica em `packages/knowledge` + `packages/storage`, com a tela em `/knowledge`. Contrato da API: [docs/api/knowledge.md](docs/api/knowledge.md); decisões: [ADR 0020](docs/adr/0020-ingestao-base-conhecimento.md).
+
 ---
 
 ## 🔐 Autenticação (Better Auth)

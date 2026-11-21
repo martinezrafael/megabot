@@ -104,6 +104,28 @@ export const QUEUES = {
     keepCompletedSeconds: 3 * DAY,
   }),
 
+  /**
+   * Ingestão de uma fonte da base de conhecimento (T2.2): baixa/lê o arquivo, extrai o texto,
+   * divide em trechos e gera os embeddings. Demorado (depende do provedor de IA), por isso a
+   * concorrência é baixa e o tempo máximo é generoso.
+   *
+   * `mode`: `full` reprocessa a fonte inteira; `stale` só recalcula o embedding dos trechos
+   * editados à mão (`embedding_stale`).
+   */
+  knowledgeIngest: defineQueue({
+    name: 'knowledge.ingest',
+    description: 'Extrair texto, dividir em trechos e gerar embeddings de uma fonte da base.',
+    payload: z.object({
+      tenantId,
+      sourceId: z.uuid(),
+      mode: z.enum(['full', 'stale']).default('full'),
+    }),
+    retry: { retryLimit: 3, retryDelaySeconds: 30, retryDelayMaxSeconds: 10 * 60 },
+    expireInSeconds: 15 * 60,
+    concurrency: 2,
+    keepCompletedSeconds: 3 * DAY,
+  }),
+
   /** Gera a resposta do assistente (chamada ao LLM: lenta e sujeita a limite de uso). */
   llmReply: defineQueue({
     name: 'llm.reply',

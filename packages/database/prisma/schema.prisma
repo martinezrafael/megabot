@@ -28,6 +28,7 @@ model Tenant {
   whatsappRateLimits  WhatsappRateLimit[]
   webhookEvents       WebhookEvent[]
   contacts            Contact[]
+  knowledgeSources    KnowledgeSource[]
 
   @@map("tenants")
 }
@@ -258,4 +259,76 @@ model Message {
   @@index([tenantId, conversationId, sentAt])
   @@index([tenantId, contactId, sentAt])
   @@map("messages")
+}
+
+/// Uma fonte da base de conhecimento: arquivo enviado, URL importada ou texto colado (T2.2).
+model KnowledgeSource {
+  id       String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  /// upload | url | text
+  kind     String
+  title    String
+  /// pending | processing | ready | failed
+  status   String @default("pending")
+  /// 0 a 100 (barra de progresso da tela).
+  progress Int    @default(0) @db.SmallInt
+
+  /// Origem: exatamente uma destas três é preenchida (CHECK no banco).
+  sourceUrl  String? @map("source_url")
+  storageKey String? @map("storage_key")
+  rawText    String? @map("raw_text")
+
+  fileName String? @map("file_name")
+  mimeType String? @map("mime_type")
+  byteSize Int?    @map("byte_size")
+
+  /// Resultado da última ingestão.
+  checksum            String?
+  charCount           Int?      @map("char_count")
+  chunkCount          Int       @default(0) @map("chunk_count")
+  embeddingModel      String?   @map("embedding_model")
+  embeddingDimensions Int?      @map("embedding_dimensions") @db.SmallInt
+  lastIngestedAt      DateTime? @map("last_ingested_at") @db.Timestamptz(6)
+
+  /// Erro legível (nunca stack trace); só existe quando status = failed.
+  errorCode    String? @map("error_code")
+  errorMessage String? @map("error_message")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tenant Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  chunks KnowledgeChunk[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, status])
+  @@map("knowledge_sources")
+}
+
+/// Um trecho de uma fonte, com seu embedding no pgvector (T2.2).
+/// `embedding` é Unsupported: o Prisma não lê/escreve vector; isso é feito em SQL puro
+/// (packages/database/src/knowledge.ts). O índice HNSW vive só na migration.
+model KnowledgeChunk {
+  id        String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String @map("tenant_id") @db.Uuid
+  sourceId  String @map("source_id") @db.Uuid
+  position  Int
+  content   String
+  charCount Int    @map("char_count")
+  heading   String?
+
+  embedding      Unsupported("vector(1536)")?
+  embeddingModel String?                     @map("embedding_model")
+  embeddingStale Boolean                     @default(false) @map("embedding_stale")
+  edited         Boolean                     @default(false)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  source KnowledgeSource @relation(fields: [tenantId, sourceId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, sourceId, position])
+  @@index([tenantId, embeddingStale])
+  @@map("knowledge_chunks")
 }

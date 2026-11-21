@@ -1,9 +1,11 @@
+import { createOpenAiProvider } from '@megabot/ai';
 import { getWhatsappAccessToken } from '@megabot/database';
 import { QUEUES, type QueueClient } from '@megabot/queue';
 import type { Logger } from 'pino';
 import type { WorkerConfig } from '../config';
 import { createEchoReplyHandler } from './echo-reply';
 import { createInboundMessageHandler } from './inbound-message';
+import { createIngestKnowledgeHandler } from './ingest-knowledge';
 import { createMessageStatusHandler } from './message-status';
 import { createOutboundMessageHandler } from './outbound-message';
 import { createSystemPingHandler } from './system-ping';
@@ -15,7 +17,7 @@ import { createSystemPingHandler } from './system-ping';
 export async function registerHandlers(
   client: QueueClient,
   config: WorkerConfig,
-  logger?: Pick<Logger, 'warn'>,
+  logger?: Pick<Logger, 'warn' | 'info' | 'error'>,
 ): Promise<string[]> {
   const registered: string[] = [];
 
@@ -80,6 +82,57 @@ export async function registerHandlers(
     );
     registered.push(QUEUES.llmReply.name);
     logger?.warn({ event: 'worker.echo_enabled' }, 'ECO LIGADO: llm.reply responde "Eco: <texto>"');
+  }
+
+  // T2.2: ingestão da base de conhecimento (extrai, divide e gera embeddings).
+  // Sem IA configurada o worker NÃO pega esses jobs: eles esperam na fila até a chave existir
+  // (mesma ideia do envio sem token, acima).
+  if (config.ai) {
+    // Tokens e custo por tenant (T2.1) saem como linhas de métrica no log, como no resto do worker.
+    const provider = createOpenAiProvider(config.ai, {
+      ...(logger
+        ? {
+            logger,
+            metrics: {
+              increment: (name, labels, value = 1) =>
+                logger.info({
+                  event: 'metric',
+                  metric: name,
+                  metric_type: 'counter',
+                  value,
+                  ...labels,
+                }),
+              timing: (name, ms, labels) =>
+                logger.info({
+                  event: 'metric',
+                  metric: name,
+                  metric_type: 'timing',
+                  value: ms,
+                  ...labels,
+                }),
+            },
+          }
+        : {}),
+    });
+    await client.work(
+      QUEUES.knowledgeIngest,
+      createIngestKnowledgeHandler({
+        storage: config.storage,
+        embedder: provider,
+        maxBytes: config.knowledge.maxBytes,
+        embedBatchSize: config.knowledge.embedBatchSize,
+        chunkOptions: {
+          maxChars: config.knowledge.chunkMaxChars,
+          overlapChars: config.knowledge.chunkOverlapChars,
+        },
+      }),
+    );
+    registered.push(QUEUES.knowledgeIngest.name);
+  } else {
+    logger?.warn(
+      { event: 'worker.knowledge_disabled', queue: QUEUES.knowledgeIngest.name },
+      'Sem OPENAI_API_KEY/AI_EMBEDDING_MODEL: knowledge.ingest NÃO será processado (os jobs ficam esperando)',
+    );
   }
 
   return registered;

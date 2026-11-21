@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { ALL_QUEUES, QUEUES, defineQueue, findQueueByName } from '../src';
+import { ALL_QUEUES, QUEUES, defineQueue, findQueueByName, isUuid, jobIdFor } from '../src';
 import { z } from 'zod';
 
 describe('definições das filas', () => {
@@ -53,5 +53,30 @@ describe('definições das filas', () => {
     assert.equal(findQueueByName('whatsapp.inbound')?.name, 'whatsapp.inbound');
     assert.equal(findQueueByName('whatsapp.inbound.dlq')?.name, 'whatsapp.inbound');
     assert.equal(findQueueByName('nao.existe'), undefined);
+  });
+});
+
+describe('jobIdFor (chave de idempotência -> UUID)', () => {
+  it('é determinístico e tem forma de UUID', () => {
+    const a = jobIdFor('knowledge-full', 'fonte-1', 1795218679850);
+    assert.equal(a, jobIdFor('knowledge-full', 'fonte-1', 1795218679850));
+    assert.ok(isUuid(a), a);
+    // Versão 5 e variante RFC 4122.
+    assert.equal(a[14], '5');
+    assert.ok(['8', '9', 'a', 'b'].includes(a[19]!));
+  });
+
+  it('entradas diferentes dão UUIDs diferentes (inclusive só mudando a ordem)', () => {
+    const base = jobIdFor('knowledge-full', 'fonte-1', 1);
+    assert.notEqual(base, jobIdFor('knowledge-full', 'fonte-1', 2));
+    assert.notEqual(base, jobIdFor('knowledge-stale', 'fonte-1', 1));
+    assert.notEqual(jobIdFor('a', 'b'), jobIdFor('ab'));
+  });
+
+  it('isUuid aceita UUID e recusa o resto', () => {
+    assert.equal(isUuid('9bce8270-cc29-4473-8569-2c37531ffc75'), true);
+    assert.equal(isUuid('9bce8270-cc29-4473-8569-2c37531ffc75-1795218679850'), false);
+    assert.equal(isUuid('nao-e-uuid'), false);
+    assert.equal(isUuid(''), false);
   });
 });
