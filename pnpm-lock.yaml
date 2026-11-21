@@ -196,6 +196,9 @@ importers:
       '@megabot/queue':
         specifier: workspace:*
         version: link:../../packages/queue
+      '@megabot/retrieval':
+        specifier: workspace:*
+        version: link:../../packages/retrieval
       '@megabot/storage':
         specifier: workspace:*
         version: link:../../packages/storage
@@ -350,6 +353,34 @@ importers:
       '@types/pg':
         specifier: ^8.23.1
         version: 8.23.1
+      tsx:
+        specifier: ^4.19.0
+        version: 4.23.15
+      typescript:
+        specifier: ^5.0.0
+        version: 5.9.3
+
+  packages/retrieval:
+    dependencies:
+      '@megabot/ai':
+        specifier: workspace:*
+        version: link:../ai
+      '@megabot/database':
+        specifier: workspace:*
+        version: link:../database
+      gpt-tokenizer:
+        specifier: ^4.1.2
+        version: 4.1.2
+    devDependencies:
+      '@megabot/eslint-config':
+        specifier: workspace:*
+        version: link:../config/eslint
+      '@megabot/tsconfig':
+        specifier: workspace:*
+        version: link:../config/tsconfig
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.5
       tsx:
         specifier: ^4.19.0
         version: 4.23.15
@@ -2891,6 +2922,9 @@ packages:
   got@13.0.0:
     resolution: {integrity: sha512-XfBk1CxOOScDcMr9O1yKkNaQyy865NbYs+F7dr4H0LZMVgCj2Le59k6PqbNHoL5ToeaEQUYh6c6yMfVcc6SJxA==}
     engines: {node: '>=16'}
+
+  gpt-tokenizer@4.1.2:
+    resolution: {integrity: sha512-5GwcLcZd6IqCdrGTTPcoKqbJk8cCWHHsoTHR/uQGZKT29CFcnJEg69qisGbKesQpzxRq9yQO4lBgsaZ8SawcGQ==}
 
   graceful-fs@4.2.11:
     resolution: {integrity: sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ==}
@@ -7182,6 +7216,8 @@ snapshots:
       lowercase-keys: 3.0.0
       p-cancelable: 3.0.0
       responselike: 3.0.0
+
+  gpt-tokenizer@4.1.2: {}
 
   graceful-fs@4.2.11: {}
 

@@ -1,0 +1,83 @@
+diff --git a/.env.example b/.env.example
+index dca957a..fd1652b 100644
+--- a/.env.example
++++ b/.env.example
+@@ -74,14 +74,18 @@ PLATFORM_ADMIN_EMAILS=
+ # WORKER_SHUTDOWN_TIMEOUT_SECONDS=30    # quanto esperar jobs em andamento ao desligar (deploy)
+ 
+ # API Keys & Third-party Services (Preencha com suas chaves de dev)
+-OPENAI_API_KEY=sk-proj-xxxxxxxxxxxxxxxxxxxxxxxx
++# OPENAI_API_KEY, AI_CHAT_MODEL e AI_EMBEDDING_MODEL andam JUNTOS: se você preencher um, precisa
++# preencher os três, senão o worker não sobe ("AI_CHAT_MODEL: obrigatório"). Deixando os três
++# comentados, API e worker sobem normalmente — só a base de conhecimento (ingestão e busca) fica
++# esperando na fila até a configuração existir.
++# OPENAI_API_KEY=sk-proj-xxxxxxxxxxxxxxxxxxxxxxxx
+ # Pacote @megabot/ai (T2.1). Modelos e preços ficam AQUI, não no código (ADR 0009/0019).
+ #   AI_CHAT_MODEL / AI_EMBEDDING_MODEL: os nomes dos modelos que você escolheu no provedor. Sem eles, a IA não sobe.
+ #   AI_PRICING_JSON: preços ATUAIS em USD por 1 milhão de tokens (veja a página de preços do provedor), ex.:
+ #     {"meu-modelo-de-chat":{"inputPerMillion":0.4,"outputPerMillion":1.6,"cachedInputPerMillion":0.1}}
+ #   Sem preço para um modelo, o custo estimado fica em branco (null) — nunca é inventado.
+-AI_CHAT_MODEL=
+-AI_EMBEDDING_MODEL=
++# AI_CHAT_MODEL=gpt-4o-mini
++# AI_EMBEDDING_MODEL=text-embedding-3-small
+ # AI_EMBEDDING_DIMENSIONS=1536     # opcional: deve casar com o vector(N) do banco
+ # AI_PRICING_JSON=
+ # AI_TIMEOUT_MS=30000              # tempo máximo por tentativa
+diff --git a/apps/worker/tests/worker.test.ts b/apps/worker/tests/worker.test.ts
+index 5c5e4b0..4c8ed8f 100644
+--- a/apps/worker/tests/worker.test.ts
++++ b/apps/worker/tests/worker.test.ts
+@@ -14,12 +14,21 @@ const DATABASE_URL =
+   'postgresql://megabot_app:megabot_pass@localhost:5432/megabot?schema=public';
+ const TENANT = '11111111-1111-4111-8111-111111111111';
+ 
+-async function waitFor<T>(check: () => T | Promise<T>, what: string, timeoutMs = 20_000) {
++async function waitFor<T>(
++  check: () => T | Promise<T>,
++  what: string,
++  timeoutMs = 20_000,
++  /** Detalhe a juntar na mensagem quando o tempo acabar (ex.: o que o processo filho imprimiu). */
++  detalhe?: () => string,
++) {
+   const deadline = Date.now() + timeoutMs;
+   for (;;) {
+     const value = await check();
+     if (value) return value as NonNullable<T>;
+-    if (Date.now() > deadline) throw new Error(`Tempo esgotado: ${what}`);
++    if (Date.now() > deadline) {
++      const extra = detalhe?.();
++      throw new Error(`Tempo esgotado: ${what}${extra ? `\n${extra}` : ''}`);
++    }
+     await new Promise((r) => setTimeout(r, 100));
+   }
+ }
+@@ -108,7 +117,13 @@ describe('main.ts como processo (sinais)', () => {
+     const child = spawn(process.execPath, ['--import', 'tsx', 'src/main.ts'], {
+       cwd,
+       env: {
+-        ...process.env,
++        // Env MÍNIMO de propósito. O `test` do worker roda com `--env-file=../../.env`, então o
++        // .env da máquina entra no process.env; herdar isso num filho com NODE_ENV=production faz
++        // o worker morrer na largada por causa de QUALQUER variável que a máquina tenha (eco
++        // ligado, OPENAI_API_KEY sem os modelos, storage apontando para a nuvem...). Este teste é
++        // sobre SINAIS: ele passa só o que o worker precisa para subir, e nada mais.
++        PATH: process.env.PATH ?? '',
++        HOME: process.env.HOME ?? '',
+         NODE_ENV: 'production',
+         DATABASE_URL,
+         QUEUE_SCHEMA: schema,
+@@ -131,7 +146,12 @@ describe('main.ts como processo (sinais)', () => {
+     const schema = newSchema();
+     const { child, lines, exit } = launch(schema);
+     try {
+-      await waitFor(() => lines.some((l) => l.includes('worker.ready')), 'worker pronto', 30_000);
++      await waitFor(
++        () => lines.some((l) => l.includes('worker.ready')),
++        'worker pronto',
++        30_000,
++        () => `Saída do worker:\n${lines.join('\n') || '(o processo não imprimiu nada)'}`,
++      );
+       child.kill('SIGTERM');
+       const code = await exit;
+       assert.equal(code, 0);
